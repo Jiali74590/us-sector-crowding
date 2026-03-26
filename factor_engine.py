@@ -14,6 +14,7 @@ from typing import Dict
 from config import (
     SECTOR_ETFS,
     TRADING_W, POSITIONING_W, VALUATION_W, NARRATIVE_W, BEHAVIORAL_W,
+    INDICATOR_QUALITY, DIMENSION_WEIGHTS,
 )
 
 
@@ -253,23 +254,34 @@ def compute_valuation(prices: pd.DataFrame) -> pd.DataFrame:
 
 # ── 4. 预期拥挤 ───────────────────────────────────────────────────────────────
 
-def compute_narrative(prices: pd.DataFrame) -> pd.DataFrame:
+def compute_narrative(prices: pd.DataFrame, news_counts: Dict = None) -> pd.DataFrame:
     """
     衡量市场叙事/预期是否已高度集中：
-    - 动量加速度：1M收益 vs 3M月均收益（加速 = 叙事共振）
-    - 收益率正偏度：近60日收益右偏 = 市场单边乐观
-    - 新闻热度：占位，暂返回 50（结构预留）
-    注意：此维度反映"故事是否已人尽皆知"，不只是涨幅。
+    - 动量加速度：1M收益 vs 3M月均收益（加速 = 叙事共振）— 真实数据
+    - 收益率正偏度：近60日收益右偏 = 市场单边乐观 — 真实数据
+    - 媒体热度代理：yfinance 新闻条目数跨行业横截面分位 — 代理变量
+
+    news_counts: fetch_news_count() 的输出，缺失时媒体热度回退至 50。
     """
+    # ── 预先计算新闻横截面排名（跨 ticker）
+    if news_counts is not None:
+        counts_7d = {t: (news_counts.get(t) or {}).get("count_7d", 0) or 0
+                     for t in SECTOR_ETFS}
+        all_counts = list(counts_7d.values())
+        n_tickers  = len(all_counts)
+    else:
+        counts_7d  = {}
+        n_tickers  = 0
+
     rows = {}
     for t in SECTOR_ETFS:
         p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
 
         # 动量加速度
         if len(p) > 63:
-            r1m = (p.iloc[-1] / p.iloc[-22] - 1) * 100
-            r3m = (p.iloc[-1] / p.iloc[-64] - 1) * 100
-            accel = r1m - r3m / 3        # 近期月收益 vs 3M平均月收益
+            r1m   = (p.iloc[-1] / p.iloc[-22] - 1) * 100
+            r3m   = (p.iloc[-1] / p.iloc[-64] - 1) * 100
+            accel = r1m - r3m / 3
             accel_score = min(100, max(0, (accel + 5) / 10 * 100))
         else:
             accel_score = 50.0
@@ -281,15 +293,28 @@ def compute_narrative(prices: pd.DataFrame) -> pd.DataFrame:
         else:
             skew_score = 50.0
 
+        # 媒体热度代理（横截面分位：该行业新闻数 vs 所有行业）
+        if n_tickers > 1 and counts_7d:
+            cnt = counts_7d.get(t, 0)
+            rank = sum(1 for x in all_counts if x < cnt)
+            news_score    = round(rank / n_tickers * 100, 1)
+            news_raw      = f"{cnt}条/7天"
+            news_is_proxy = True
+        else:
+            news_score    = 50.0
+            news_raw      = "数据获取中"
+            news_is_proxy = False
+
         rows[t] = {
-            "accel_score":     round(accel_score, 1),
-            "skew_score":      round(skew_score, 1),
-            "news_score":      50.0,    # 占位
-            "news_note":       "待接入新闻API",
+            "accel_score":    round(accel_score, 1),
+            "skew_score":     round(skew_score, 1),
+            "news_score":     news_score,
+            "news_raw":       news_raw,
+            "news_is_proxy":  news_is_proxy,
         }
 
     df = pd.DataFrame(rows).T
-    for c in ["accel_score","skew_score","news_score"]:
+    for c in ["accel_score", "skew_score", "news_score"]:
         df[c] = df[c].astype(float)
 
     df["预期拥挤"] = (
@@ -451,9 +476,9 @@ def build_scorecard(ticker: str,
             ("收益偏度",   "—",
              r.get("skew_score", 50),   NARRATIVE_W["return_skew"],
              "近60日收益右偏度——单边乐观程度"),
-            ("新闻热度",   "占位50",
+            ("媒体热度代理", r.get("news_raw", "获取中"),
              r.get("news_score", 50),   NARRATIVE_W["news_proxy"],
-             "⚠️当前为占位（固定50），待接入新闻API"),
+             "yfinance新闻条目数跨行业横截面分位，衡量相对媒体关注度"),
         ]
         for name, raw, score, w, desc in items:
             sf = safe_float(score, 50)
@@ -484,3 +509,90 @@ def build_scorecard(ticker: str,
                              "子项贡献": round(sf * w, 1), "说明": desc})
 
     return records
+
+
+# ── 数据完整度评估 ────────────────────────────────────────────────────────────
+
+def compute_completeness(ticker: str,
+                         t_df: pd.DataFrame, p_df: pd.DataFrame,
+                         v_df: pd.DataFrame, n_df: pd.DataFrame,
+                         b_df: pd.DataFrame,
+                         pcr_data: Dict = None) -> dict:
+    """
+    评估单个 ticker 的数据完整度与评分置信度。
+
+    返回 dict：
+        completeness_pct  : 0-100，加权完整度
+        confidence        : "高" / "中" / "低"
+        dim_completeness  : 各维度完整度 dict
+        missing_items     : 缺失或降级的指标列表
+    """
+    dim_weights = DIMENSION_WEIGHTS
+
+    # 各维度完整度：以 INDICATOR_QUALITY 质量分 × 维度内权重 加权计算
+    # 行为拥挤：若 PCR 实际缺失，P/C Ratio 质量降为 0
+    pcr_missing = (pcr_data is None) or (pcr_data.get(ticker) is None)
+    # 预期拥挤：媒体热度是否来自真实抓取
+    news_is_proxy = True  # 即使有数据也是代理变量
+    news_missing  = False
+    if ticker in n_df.index:
+        news_missing = not bool(n_df.loc[ticker].get("news_is_proxy", False))
+
+    dim_comp = {}
+    missing_items = []
+
+    # ── 交易拥挤（全真实数据，除非价格序列过短）
+    trading_q = 1.0 if (ticker in t_df.index) else 0.5
+    dim_comp["交易拥挤"] = trading_q * 100
+
+    # ── 持仓拥挤（全代理变量）
+    dim_comp["持仓拥挤"] = 60.0  # 3个代理指标平均 quality=0.6
+    missing_items.append("持仓数据（代理：成交量趋势/Beta/资金流）")
+
+    # ── 估值拥挤（价格行为代理，非真正基本面估值）
+    dim_comp["估值拥挤"] = 72.0  # 2×proxy(0.7) + 1×real(0.9) ÷ 3 ≈ 0.77
+    missing_items.append("基本面估值（PE/PB等，用价格行为代替）")
+
+    # ── 预期拥挤
+    accel_q = 1.0; skew_q = 0.8
+    news_q  = 0.0 if news_missing else 0.6  # 有代理=0.6, 无数据=0
+    w_a = NARRATIVE_W["momentum_accel"]
+    w_s = NARRATIVE_W["return_skew"]
+    w_n = NARRATIVE_W["news_proxy"]
+    narr_raw = (accel_q * w_a + skew_q * w_s + news_q * w_n) / (w_a + w_s + w_n)
+    dim_comp["预期拥挤"] = round(narr_raw * 100, 1)
+    if news_missing:
+        missing_items.append("媒体热度（新闻数据获取失败）")
+    else:
+        missing_items.append("媒体热度（代理：yfinance新闻条目数）")
+
+    # ── 行为拥挤
+    up_q   = 1.0; asym_q = 0.8
+    pcr_q  = 0.0 if pcr_missing else 1.0
+    w_u  = BEHAVIORAL_W["up_day_ratio"]
+    w_as = BEHAVIORAL_W["return_asymmetry"]
+    w_p  = BEHAVIORAL_W["pcr_proxy"]
+    beh_raw = (up_q * w_u + asym_q * w_as + pcr_q * w_p) / (w_u + w_as + w_p)
+    dim_comp["行为拥挤"] = round(beh_raw * 100, 1)
+    if pcr_missing:
+        missing_items.append("P/C Ratio（该行业期权数据不可用）")
+
+    # ── 汇总加权完整度
+    total_comp = sum(dim_comp[d] * dim_weights.get(d, 0.2)
+                     for d in dim_comp) / sum(dim_weights.values())
+    total_comp = round(total_comp, 1)
+
+    # ── 置信度等级
+    if total_comp >= 78:
+        confidence = "高"
+    elif total_comp >= 60:
+        confidence = "中"
+    else:
+        confidence = "低"
+
+    return {
+        "completeness_pct": total_comp,
+        "confidence":       confidence,
+        "dim_completeness": dim_comp,
+        "missing_items":    missing_items,
+    }

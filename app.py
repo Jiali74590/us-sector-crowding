@@ -12,13 +12,13 @@ from datetime import datetime
 
 from config import (
     SECTOR_ETFS, DIMENSION_WEIGHTS, CROWDING_LEVELS,
-    DIMENSION_META, INDICATOR_META,
+    DIMENSION_META, INDICATOR_META, INDICATOR_QUALITY,
 )
-from data_fetcher import fetch_price_volume, fetch_etf_info, fetch_pcr
+from data_fetcher import fetch_price_volume, fetch_etf_info, fetch_pcr, fetch_news_count
 from factor_engine import (
     compute_trading, compute_positioning,
     compute_valuation, compute_narrative, compute_behavioral,
-    build_scorecard,
+    build_scorecard, compute_completeness,
 )
 from scoring import aggregate, commentary, get_level
 
@@ -268,6 +268,52 @@ def score_breakdown_html(row: pd.Series, weights: dict) -> str:
     )
 
 
+TIER_BADGE = {
+    "real":    '<span style="background:#0d3020;color:#44ee88;border:1px solid #1a5030;'
+               'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">真实数据</span>',
+    "proxy":   '<span style="background:#2a2010;color:#ddaa44;border:1px solid #5a4010;'
+               'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">代理变量</span>',
+    "missing": '<span style="background:#0a0a1a;color:#445566;border:1px dashed #2a3050;'
+               'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">暂未接入</span>',
+}
+
+CONFIDENCE_STYLE = {
+    "高": ("color:#44ee88", "高"),
+    "中": ("color:#ddaa44", "中"),
+    "低": ("color:#ee4444", "低"),
+}
+
+
+def completeness_banner(comp: dict) -> str:
+    pct = comp["completeness_pct"]
+    conf, conf_label = CONFIDENCE_STYLE[comp["confidence"]][:1], comp["confidence"]
+    conf_color = CONFIDENCE_STYLE[comp["confidence"]][0]
+    bar_color = "#44ee88" if pct >= 78 else "#ddaa44" if pct >= 60 else "#ee4444"
+
+    dim_rows = "".join(
+        f'<div style="display:flex;justify-content:space-between;padding:2px 0;'
+        f'font-size:11px;border-bottom:1px solid #0d1520">'
+        f'<span style="color:#7a8a9a">{d}</span>'
+        f'<span style="color:{bar_color}">{v:.0f}%</span></div>'
+        for d, v in comp["dim_completeness"].items()
+    )
+    return (
+        f'<div style="background:#0a1020;border:1px solid #1a2a3a;border-radius:5px;'
+        f'padding:10px 14px;margin-bottom:10px">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+        f'<span style="color:#6a7a9a;font-size:11px">数据完整度</span>'
+        f'<span style="font-size:18px;font-weight:700;color:{bar_color}">{pct:.0f}%</span>'
+        f'</div>'
+        f'<div style="background:#0d1420;border-radius:3px;height:5px;margin-bottom:8px">'
+        f'<div style="width:{pct}%;background:{bar_color};height:5px;border-radius:3px"></div></div>'
+        f'{dim_rows}'
+        f'<div style="margin-top:8px;display:flex;gap:8px;align-items:center">'
+        f'<span style="color:#4a5a7a;font-size:10px">评分置信度：</span>'
+        f'<span style="font-size:12px;font-weight:600;{conf_color}">{comp["confidence"]}</span>'
+        f'</div></div>'
+    )
+
+
 def dim_interpretation(dim: str, score: float, sub: dict) -> str:
     """为每个维度自动生成一句解读"""
     if dim == "交易拥挤":
@@ -322,18 +368,19 @@ def load_scores(w_tuple: tuple) -> tuple:
     weights = dict(w_tuple)
     prices, volumes = fetch_price_volume()
     fetch_etf_info()   # warm cache
-    pcr_d = fetch_pcr()
+    pcr_d    = fetch_pcr()
+    news_d   = fetch_news_count()
 
     t_df = compute_trading(prices, volumes)
     p_df = compute_positioning(prices, volumes)
     v_df = compute_valuation(prices)
-    n_df = compute_narrative(prices)
+    n_df = compute_narrative(prices, news_d)
     b_df = compute_behavioral(prices, pcr_d)
 
     scores = aggregate(t_df, p_df, v_df, n_df, b_df, weights)
     detail = dict(trading=t_df, positioning=p_df, valuation=v_df,
                   narrative=n_df, behavioral=b_df,
-                  prices=prices, volumes=volumes)
+                  prices=prices, volumes=volumes, pcr=pcr_d)
     return scores, detail
 
 
@@ -637,12 +684,17 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
         unsafe_allow_html=True
     )
 
-    t_df = detail["trading"]
-    p_df = detail["positioning"]
-    v_df = detail["valuation"]
-    n_df = detail["narrative"]
-    b_df = detail["behavioral"]
+    t_df  = detail["trading"]
+    p_df  = detail["positioning"]
+    v_df  = detail["valuation"]
+    n_df  = detail["narrative"]
+    b_df  = detail["behavioral"]
+    pcr_d = detail.get("pcr", {})
     scorecard = build_scorecard(sel, t_df, p_df, v_df, n_df, b_df)
+
+    # ── 数据完整度面板（全宽，在雷达图后）
+    comp = compute_completeness(sel, t_df, p_df, v_df, n_df, b_df, pcr_d)
+    st.markdown(completeness_banner(comp), unsafe_allow_html=True)
 
     dims_sorted = sorted(DIMS, key=lambda d: -float(row.get(d, 50)))
     for dim in dims_sorted:
@@ -683,9 +735,11 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
                 ic = score_color(ind_score)
                 bar_w = max(3, int(ind_score))
                 name_tt = tt(ind_name, ind_name)
+                tier = INDICATOR_QUALITY.get(ind_name, {}).get("tier", "real")
+                tier_html = TIER_BADGE.get(tier, "")
                 rows_html += (
                     f"<tr>"
-                    f"<td style='color:#8899bb;width:130px'>{name_tt}</td>"
+                    f"<td style='color:#8899bb;width:130px'>{name_tt}&nbsp;{tier_html}</td>"
                     f"<td style='color:#5a6a7a;font-size:10px;width:60px'>{ind_raw}</td>"
                     f"<td style='width:100px'>"
                     f"  <div class='sub-bar-bg'>"
@@ -879,8 +933,11 @@ def tab_signals(scores: pd.DataFrame):
                 border_color="#1e4a2a")
 
     st.markdown("---")
-    st.markdown('<div class="note">⚠️ 占位提示：预期拥挤维度中「新闻热度」因子当前固定为 50（待接入新闻API或Google Trends）。</div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="note">预期拥挤维度「媒体热度代理」因子基于 yfinance 新闻条目计数的横截面排名（非历史分位），'
+        '衡量相对媒体关注度。持仓拥挤各指标为ETF成交量/Beta代理，非直接基金持仓数据。</div>',
+        unsafe_allow_html=True
+    )
 
 
 # ─── Tab 5: 方法说明 ─────────────────────────────────────────────────────────
@@ -932,8 +989,8 @@ def tab_method():
          "此处估值代理基于价格行为，不是真正的PE/PB等基本面估值倍数，局限性明显。"),
         ("预期拥挤", "20%", "#2471a3",
          "衡量市场叙事/共识是否已高度集中，「人尽皆知」的程度。"
-         "包含：动量加速度（1M vs 3M月均）、收益率偏度（近60日）、新闻热度（⚠️占位50）。",
-         "新闻热度因子当前为占位，未接入真实新闻API，影响此维度准确性。"),
+         "包含：动量加速度（1M vs 3M月均）、收益率偏度（近60日）、媒体热度代理（yfinance新闻计数横截面排名）。",
+         "媒体热度为代理变量，基于各行业ETF的yfinance新闻条目数量做横截面排名，衡量相对关注度，非绝对热度。"),
         ("行为拥挤", "15%", "#1e8449",
          "衡量市场是否正在失去风险感：坏消息被忽视，期权市场过度乐观。"
          "包含：近30日上涨日比例、正/负收益不对称、Put/Call Ratio。",
@@ -1020,8 +1077,8 @@ def tab_method():
         ("ds-live",        "✅ 真实数据",  "期权 P/C Ratio",       "从期权链实时计算，部分行业流动性不足时可能缺失"),
         ("ds-proxy",       "⚠️ 代理指标", "Beta 扩张",            "用近期/中期 Beta 比值代理资金集中度，非直接持仓数据"),
         ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "基于价格行为（Z-Score、MA200偏离），不是PE/PB等基本面估值"),
-        ("ds-placeholder", "🔲 占位50",   "新闻热度",             "待接入新闻API或Google Trends，当前固定50，不影响其他维度"),
-        ("ds-placeholder", "🔲 占位",     "基金持仓（13F）",      "待接入，接入后持仓拥挤维度将显著改善"),
+        ("ds-proxy",       "⚠️ 代理指标", "媒体热度代理",         "yfinance新闻条目数量横截面排名（11个行业互比），衡量相对媒体关注度"),
+        ("ds-placeholder", "🔲 暂未接入", "基金持仓（13F）",      "待接入，接入后持仓拥挤维度将显著改善"),
     ]
     for css, status, name, note in data_items:
         st.markdown(

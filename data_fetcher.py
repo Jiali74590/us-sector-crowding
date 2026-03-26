@@ -1,5 +1,5 @@
 """
-数据获取层 — 价格/成交量、ETF信息、期权P/C
+数据获取层 — 价格/成交量、ETF信息、期权P/C、新闻热度代理
 """
 
 import streamlit as st
@@ -76,3 +76,39 @@ def fetch_pcr() -> Dict[str, float]:
         except Exception:
             pcr[t] = None
     return pcr
+
+
+@st.cache_data(ttl=7200, show_spinner="获取媒体热度数据…")
+def fetch_news_count() -> Dict[str, dict]:
+    """
+    通过 yfinance 获取各行业 ETF 的近期新闻条目数，
+    用作「媒体/搜索热度」的代理变量。
+
+    返回 dict：ticker → {count_7d, count_30d, total, has_data}
+    分数在 compute_narrative 中跨行业标准化（横截面分位），
+    衡量「相对媒体关注度」，而非绝对热度。
+    """
+    result = {}
+    now_ts = datetime.now().timestamp()
+    for t in SECTOR_ETFS:
+        try:
+            news_list = yf.Ticker(t).news or []
+            count_7d = sum(
+                1 for n in news_list
+                if isinstance(n, dict)
+                and (now_ts - n.get("providerPublishTime", 0)) < 7 * 86400
+            )
+            count_30d = sum(
+                1 for n in news_list
+                if isinstance(n, dict)
+                and (now_ts - n.get("providerPublishTime", 0)) < 30 * 86400
+            )
+            result[t] = {
+                "count_7d":  count_7d,
+                "count_30d": count_30d,
+                "total":     len(news_list),
+                "has_data":  True,
+            }
+        except Exception:
+            result[t] = {"count_7d": 0, "count_30d": 0, "total": 0, "has_data": False}
+    return result

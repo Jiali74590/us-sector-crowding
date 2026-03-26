@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd C:/Users/Administrator/us-sector-crowding && git add -A && git diff --cached --quiet || git commit -m \"auto: save progress $(date '+%Y-%m-%d %H:%M')\" && git push"
+          }
+        ]
+      }
+    ]
+  }
+}
