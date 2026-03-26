@@ -1,0 +1,362 @@
+"""
+五层拥挤因子计算引擎
+所有子因子统一输出为 0-100 历史分位数分，独立评估，互不污染。
+
+设计原则：
+- 交易拥挤 ≠ 景气/基本面好
+- RSI高 + 涨幅高 ≠ 拥挤，还需结合成交量、持仓、估值
+- 每层因子尽量反映独立信息
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Dict
+from config import (
+    SECTOR_ETFS,
+    TRADING_W, POSITIONING_W, VALUATION_W, NARRATIVE_W, BEHAVIORAL_W,
+)
+
+
+# ── 工具 ──────────────────────────────────────────────────────────────────────
+
+def hist_pct(series: pd.Series, value: float, window: int = 252) -> float:
+    """value 在 series 最近 window 期中的历史分位数 → 0-100"""
+    s = series.dropna()
+    if len(s) < 10 or np.isnan(value):
+        return 50.0
+    hist = s.iloc[-window:] if len(s) > window else s
+    return round(float((hist < value).sum() / len(hist) * 100), 1)
+
+
+def safe_float(val, default=50.0) -> float:
+    try:
+        v = float(val)
+        return default if np.isnan(v) else v
+    except Exception:
+        return default
+
+
+# ── 1. 交易拥挤 ───────────────────────────────────────────────────────────────
+
+def compute_trading(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataFrame:
+    """
+    衡量短期交易热度，不等于景气度：
+    - RSI 历史分位
+    - 1M 动量历史分位
+    - 成交量 surge（20D / 252D 均量）
+    - 波动率扩张（30D / 90D）
+    - 价格在 52W 区间位置（接近高点 = 交易拥挤）
+    """
+    rows = {}
+    for t in SECTOR_ETFS:
+        p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
+        v = volumes[t].dropna() if t in volumes.columns else pd.Series(dtype=float)
+
+        # RSI(14)
+        delta = p.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rsi_s = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+        rsi_v = safe_float(rsi_s.iloc[-1]) if len(rsi_s) > 14 else 50.0
+        rsi_score = hist_pct(rsi_s, rsi_v)
+
+        # 1M 动量
+        mom1m_s = (p / p.shift(21) - 1) * 100
+        mom1m_v = safe_float(mom1m_s.iloc[-1]) if len(p) > 21 else np.nan
+        mom1m_score = hist_pct(mom1m_s, mom1m_v) if not np.isnan(mom1m_v) else 50.0
+
+        # 成交量 surge
+        if len(v) > 60:
+            surge_s = v.rolling(20).mean() / (v.rolling(252).mean() + 1e-6)
+            surge_v = safe_float(surge_s.iloc[-1])
+            vol_surge_score = hist_pct(surge_s, surge_v)
+        else:
+            vol_surge_score = 50.0
+
+        # 波动率扩张
+        if len(p) > 90:
+            rv30 = p.pct_change().rolling(30).std()
+            rv90 = p.pct_change().rolling(90).std()
+            vexp_s = rv30 / (rv90 + 1e-9)
+            vexp_v = safe_float(vexp_s.iloc[-1])
+            vol_exp_score = hist_pct(vexp_s.dropna(), vexp_v)
+        else:
+            vol_exp_score = 50.0
+
+        # 价格 52W 位置（0=年低，100=年高）
+        if len(p) >= 20:
+            w = p.iloc[-252:] if len(p) >= 252 else p
+            lo, hi = w.min(), w.max()
+            prox = (p.iloc[-1] - lo) / (hi - lo + 1e-9) * 100
+            prox_score = float(prox)
+        else:
+            prox_score = 50.0
+
+        rows[t] = {
+            "rsi_raw":            round(rsi_v, 1),
+            "mom_1m_raw":         round(safe_float(mom1m_v, 0.0), 2),
+            "rsi_score":          rsi_score,
+            "mom_1m_score":       mom1m_score,
+            "volume_surge_score": vol_surge_score,
+            "vol_exp_score":      vol_exp_score,
+            "price_prox_score":   round(prox_score, 1),
+        }
+
+    df = pd.DataFrame(rows).T
+    for c in ["rsi_score","mom_1m_score","volume_surge_score","vol_exp_score","price_prox_score"]:
+        df[c] = df[c].astype(float)
+
+    df["交易拥挤"] = (
+        df["rsi_score"]          * TRADING_W["rsi"]           +
+        df["mom_1m_score"]       * TRADING_W["momentum_1m"]   +
+        df["volume_surge_score"] * TRADING_W["volume_surge"]  +
+        df["vol_exp_score"]      * TRADING_W["vol_expansion"] +
+        df["price_prox_score"]   * TRADING_W["price_proximity"]
+    ).round(1)
+    return df
+
+
+# ── 2. 持仓拥挤 ───────────────────────────────────────────────────────────────
+
+def compute_positioning(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataFrame:
+    """
+    衡量资金是否持续、集中流入：
+    - 中期成交量趋势（63D / 252D）
+    - Beta 扩张（短期 beta > 长期 beta = 资金正在追进）
+    - ETF 成交额相对 SPY 的历史分位（资金集中度代理）
+    """
+    spy_p = prices["SPY"].dropna() if "SPY" in prices.columns else None
+    spy_v = volumes["SPY"].dropna() if "SPY" in volumes.columns else None
+    rows  = {}
+
+    for t in SECTOR_ETFS:
+        p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
+        v = volumes[t].dropna() if t in volumes.columns else pd.Series(dtype=float)
+
+        # 成交量中期趋势
+        if len(v) > 63:
+            vt_s = v.rolling(63).mean() / (v.rolling(252).mean() + 1e-6)
+            vt_v = safe_float(vt_s.iloc[-1])
+            vol_trend_score = hist_pct(vt_s.dropna(), vt_v)
+        else:
+            vol_trend_score = 50.0
+
+        # Beta 扩张
+        if spy_p is not None and len(p) > 90:
+            r  = p.pct_change().dropna()
+            sr = spy_p.pct_change().reindex(r.index).dropna()
+            idx = r.index.intersection(sr.index)
+            if len(idx) >= 30:
+                r2, sr2 = r.loc[idx], sr.loc[idx]
+                def beta(ret, mkt):
+                    cov = np.cov(ret.values, mkt.values)
+                    return cov[0][1] / (cov[1][1] + 1e-12)
+                b30 = beta(r2.iloc[-30:], sr2.iloc[-30:])
+                b90 = beta(r2.iloc[-90:], sr2.iloc[-90:])
+                beta_exp = b30 / (abs(b90) + 0.1)
+                beta_exp_score = min(100, max(0, (beta_exp - 0.5) / 1.5 * 100))
+            else:
+                beta_exp_score = 50.0
+        else:
+            beta_exp_score = 50.0
+
+        # 相对 SPY 资金流（成交额比值历史分位）
+        if spy_p is not None and spy_v is not None and len(v) > 63:
+            etf_flow = (p.reindex(v.index) * v).rolling(20).mean()
+            spy_flow = (spy_p.reindex(spy_v.index) * spy_v).rolling(20).mean()
+            rf_s = (etf_flow / (spy_flow.reindex(etf_flow.index) + 1e-6)).dropna()
+            if len(rf_s) > 10:
+                rf_v = safe_float(rf_s.iloc[-1])
+                rel_flow_score = hist_pct(rf_s, rf_v)
+            else:
+                rel_flow_score = 50.0
+        else:
+            rel_flow_score = 50.0
+
+        rows[t] = {
+            "vol_trend_score":  vol_trend_score,
+            "beta_exp_score":   round(beta_exp_score, 1),
+            "rel_flow_score":   rel_flow_score,
+        }
+
+    df = pd.DataFrame(rows).T.astype(float)
+    df["持仓拥挤"] = (
+        df["vol_trend_score"] * POSITIONING_W["volume_trend"]   +
+        df["beta_exp_score"]  * POSITIONING_W["beta_expansion"] +
+        df["rel_flow_score"]  * POSITIONING_W["relative_flow"]
+    ).round(1)
+    return df
+
+
+# ── 3. 估值拥挤 ───────────────────────────────────────────────────────────────
+
+def compute_valuation(prices: pd.DataFrame) -> pd.DataFrame:
+    """
+    衡量市场定价是否已透支远期预期：
+    - 52W Z-Score（价格偏离年度均值）
+    - 价格/200日均线 历史分位
+    - 相对 SPY 3M 超额收益历史分位
+    注意：估值拥挤 ≠ 行业不好，而是预期是否已被充分定价。
+    """
+    spy_p = prices["SPY"].dropna() if "SPY" in prices.columns else None
+    rows  = {}
+
+    for t in SECTOR_ETFS:
+        p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
+
+        # 52W Z-Score → 映射到 0-100（Z=-3→0, Z=+3→100）
+        if len(p) >= 60:
+            w   = min(252, len(p))
+            mu  = p.rolling(w).mean()
+            sig = p.rolling(w).std().replace(0, np.nan)
+            zs  = (p - mu) / sig
+            z_v = safe_float(zs.iloc[-1], 0.0)
+            z_score = min(100, max(0, (z_v + 3) / 6 * 100))
+        else:
+            z_score, z_v = 50.0, 0.0
+
+        # 价格/200日均线 历史分位
+        if len(p) >= 200:
+            ma200 = p.rolling(200).mean()
+            pta_s = p / ma200
+            pta_v = safe_float(pta_s.iloc[-1])
+            pta_score = hist_pct(pta_s.dropna(), pta_v)
+        else:
+            pta_score = 50.0
+
+        # 相对 SPY 3M 超额收益历史分位
+        if spy_p is not None and len(p) > 63:
+            exc_s = (p.pct_change(63) - spy_p.reindex(p.index).pct_change(63)) * 100
+            exc_v = safe_float(exc_s.iloc[-1])
+            exc_score = hist_pct(exc_s.dropna(), exc_v)
+        else:
+            exc_score = 50.0
+
+        rows[t] = {
+            "zscore_52w_raw":   round(z_v, 2),
+            "zscore_52w_score": round(z_score, 1),
+            "pta_score":        pta_score,
+            "exc_score":        exc_score,
+        }
+
+    df = pd.DataFrame(rows).T
+    for c in ["zscore_52w_score","pta_score","exc_score"]:
+        df[c] = df[c].astype(float)
+
+    df["估值拥挤"] = (
+        df["zscore_52w_score"] * VALUATION_W["zscore_52w"]     +
+        df["pta_score"]        * VALUATION_W["price_to_ma200"] +
+        df["exc_score"]        * VALUATION_W["excess_vs_spy"]
+    ).round(1)
+    return df
+
+
+# ── 4. 预期拥挤 ───────────────────────────────────────────────────────────────
+
+def compute_narrative(prices: pd.DataFrame) -> pd.DataFrame:
+    """
+    衡量市场叙事/预期是否已高度集中：
+    - 动量加速度：1M收益 vs 3M月均收益（加速 = 叙事共振）
+    - 收益率正偏度：近60日收益右偏 = 市场单边乐观
+    - 新闻热度：占位，暂返回 50（结构预留）
+    注意：此维度反映"故事是否已人尽皆知"，不只是涨幅。
+    """
+    rows = {}
+    for t in SECTOR_ETFS:
+        p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
+
+        # 动量加速度
+        if len(p) > 63:
+            r1m = (p.iloc[-1] / p.iloc[-22] - 1) * 100
+            r3m = (p.iloc[-1] / p.iloc[-64] - 1) * 100
+            accel = r1m - r3m / 3        # 近期月收益 vs 3M平均月收益
+            accel_score = min(100, max(0, (accel + 5) / 10 * 100))
+        else:
+            accel_score = 50.0
+
+        # 收益偏度
+        if len(p) > 30:
+            skew = float(p.pct_change().dropna().iloc[-60:].skew())
+            skew_score = min(100, max(0, (skew + 2) / 4 * 100))
+        else:
+            skew_score = 50.0
+
+        rows[t] = {
+            "accel_score":     round(accel_score, 1),
+            "skew_score":      round(skew_score, 1),
+            "news_score":      50.0,    # 占位
+            "news_note":       "待接入新闻API",
+        }
+
+    df = pd.DataFrame(rows).T
+    for c in ["accel_score","skew_score","news_score"]:
+        df[c] = df[c].astype(float)
+
+    df["预期拥挤"] = (
+        df["accel_score"] * NARRATIVE_W["momentum_accel"] +
+        df["skew_score"]  * NARRATIVE_W["return_skew"]    +
+        df["news_score"]  * NARRATIVE_W["news_proxy"]
+    ).round(1)
+    return df
+
+
+# ── 5. 行为拥挤 ───────────────────────────────────────────────────────────────
+
+def compute_behavioral(prices: pd.DataFrame, pcr_data: Dict) -> pd.DataFrame:
+    """
+    衡量市场是否正在失去风险感：
+    - 近30日上涨日比例（高 = 情绪单边）
+    - 正/负收益不对称性（高 = 坏消息被忽略 = 最危险信号之一）
+    - P/C ratio（低 = 市场过度乐观 = 行为拥挤）
+    """
+    rows = {}
+    for t in SECTOR_ETFS:
+        p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
+
+        # 上涨日比例
+        if len(p) > 30:
+            rets = p.pct_change().dropna().iloc[-30:]
+            up_r = (rets > 0).sum() / len(rets)
+            # 正常市场约 52-55%，>70% 为情绪极端
+            up_score = min(100, max(0, (up_r - 0.45) / 0.30 * 100))
+        else:
+            up_score = 50.0
+
+        # 正/负收益不对称（"好消息涨多、坏消息跌少"是拥挤极度危险信号）
+        if len(p) > 60:
+            rets = p.pct_change().dropna().iloc[-60:]
+            up_rets = rets[rets > 0]
+            dn_rets = rets[rets < 0]
+            if len(up_rets) > 5 and len(dn_rets) > 5:
+                asym = float(up_rets.mean()) / (abs(float(dn_rets.mean())) + 1e-9)
+                asym_score = min(100, max(0, (asym - 0.5) / 1.5 * 100))
+            else:
+                asym_score = 50.0
+        else:
+            asym_score = 50.0
+
+        # P/C ratio（低=乐观=行为拥挤）
+        pcr = pcr_data.get(t)
+        if pcr and pcr > 0:
+            # PCR 约 0.5=极度乐观, 2.0=极度恐慌
+            pcr_score = min(100, max(0, (2.0 - pcr) / 1.5 * 100))
+        else:
+            pcr_score = 50.0
+
+        rows[t] = {
+            "up_day_score":  round(up_score, 1),
+            "asym_score":    round(asym_score, 1),
+            "pcr_score":     round(pcr_score, 1),
+            "pcr_raw":       pcr,
+        }
+
+    df = pd.DataFrame(rows).T
+    for c in ["up_day_score","asym_score","pcr_score"]:
+        df[c] = df[c].astype(float)
+
+    df["行为拥挤"] = (
+        df["up_day_score"] * BEHAVIORAL_W["up_day_ratio"]     +
+        df["asym_score"]   * BEHAVIORAL_W["return_asymmetry"] +
+        df["pcr_score"]    * BEHAVIORAL_W["pcr_proxy"]
+    ).round(1)
+    return df
