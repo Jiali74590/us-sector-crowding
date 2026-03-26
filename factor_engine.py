@@ -360,3 +360,127 @@ def compute_behavioral(prices: pd.DataFrame, pcr_data: Dict) -> pd.DataFrame:
         df["pcr_score"]    * BEHAVIORAL_W["pcr_proxy"]
     ).round(1)
     return df
+
+
+# ── 打分卡构建器 ──────────────────────────────────────────────────────────────
+
+def build_scorecard(ticker: str,
+                    t_df: pd.DataFrame, p_df: pd.DataFrame,
+                    v_df: pd.DataFrame, n_df: pd.DataFrame,
+                    b_df: pd.DataFrame) -> list:
+    """
+    为单个 ticker 构建结构化打分卡，供详情页展示。
+    返回 list[dict]，每条对应一个子指标，包含：
+        维度 / 子指标 / 原始值 / 历史分位 / 维度内权重 / 子项贡献 / 说明
+    """
+    records = []
+
+    # ── 交易拥挤子指标
+    if ticker in t_df.index:
+        r = t_df.loc[ticker]
+        items = [
+            ("RSI(14)",      f"{safe_float(r.get('rsi_raw', 50)):.1f}",
+             r.get("rsi_score", 50),           TRADING_W["rsi"],
+             "RSI历史分位——短期超买程度，非景气判断"),
+            ("1M动量",       f"{safe_float(r.get('mom_1m_raw', 0), 0):.2f}%",
+             r.get("mom_1m_score", 50),         TRADING_W["momentum_1m"],
+             "1M收益率历史分位——近期涨幅强弱"),
+            ("成交量Surge",  "—",
+             r.get("volume_surge_score", 50),   TRADING_W["volume_surge"],
+             "20日均量/252日均量——成交放量程度"),
+            ("波动率扩张",   "—",
+             r.get("vol_exp_score", 50),        TRADING_W["vol_expansion"],
+             "30日/90日波动率比——波动扩张程度"),
+            ("52W价格位置",  "—",
+             r.get("price_prox_score", 50),     TRADING_W["price_proximity"],
+             "当前价在52周区间内的位置（0=年低，100=年高）"),
+        ]
+        for name, raw, score, w, desc in items:
+            sf = safe_float(score, 50)
+            records.append({"维度": "交易拥挤", "子指标": name, "原始值": raw,
+                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
+                             "子项贡献": round(sf * w, 1), "说明": desc})
+
+    # ── 持仓拥挤子指标
+    if ticker in p_df.index:
+        r = p_df.loc[ticker]
+        items = [
+            ("成交量中期趋势", "—",
+             r.get("vol_trend_score", 50),   POSITIONING_W["volume_trend"],
+             "63日均量/252日均量——中期资金流入趋势"),
+            ("Beta扩张",       "—",
+             r.get("beta_exp_score", 50),    POSITIONING_W["beta_expansion"],
+             "近期Beta/中期Beta——追涨资金流入信号"),
+            ("相对SPY资金流",  "—",
+             r.get("rel_flow_score", 50),    POSITIONING_W["relative_flow"],
+             "ETF成交额/SPY成交额历史分位——资金集中度代理"),
+        ]
+        for name, raw, score, w, desc in items:
+            sf = safe_float(score, 50)
+            records.append({"维度": "持仓拥挤", "子指标": name, "原始值": raw,
+                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
+                             "子项贡献": round(sf * w, 1), "说明": desc})
+
+    # ── 估值拥挤子指标
+    if ticker in v_df.index:
+        r = v_df.loc[ticker]
+        items = [
+            ("52W Z-Score",    f"{safe_float(r.get('zscore_52w_raw', 0), 0):.2f}σ",
+             r.get("zscore_52w_score", 50),  VALUATION_W["zscore_52w"],
+             "价格偏离52周均值的标准差倍数（Z=-3→0分，Z=+3→100分）"),
+            ("价格/200日均线", "—",
+             r.get("pta_score", 50),         VALUATION_W["price_to_ma200"],
+             "价格相对200日均线历史分位——趋势偏离程度"),
+            ("相对SPY超额",    "—",
+             r.get("exc_score", 50),         VALUATION_W["excess_vs_spy"],
+             "3M超额收益历史分位——相对估值溢价代理"),
+        ]
+        for name, raw, score, w, desc in items:
+            sf = safe_float(score, 50)
+            records.append({"维度": "估值拥挤", "子指标": name, "原始值": raw,
+                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
+                             "子项贡献": round(sf * w, 1), "说明": desc})
+
+    # ── 预期拥挤子指标
+    if ticker in n_df.index:
+        r = n_df.loc[ticker]
+        items = [
+            ("动量加速度", "—",
+             r.get("accel_score", 50),  NARRATIVE_W["momentum_accel"],
+             "1M收益vs3M月均——叙事共振加速信号"),
+            ("收益偏度",   "—",
+             r.get("skew_score", 50),   NARRATIVE_W["return_skew"],
+             "近60日收益右偏度——单边乐观程度"),
+            ("新闻热度",   "占位50",
+             r.get("news_score", 50),   NARRATIVE_W["news_proxy"],
+             "⚠️当前为占位（固定50），待接入新闻API"),
+        ]
+        for name, raw, score, w, desc in items:
+            sf = safe_float(score, 50)
+            records.append({"维度": "预期拥挤", "子指标": name, "原始值": raw,
+                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
+                             "子项贡献": round(sf * w, 1), "说明": desc})
+
+    # ── 行为拥挤子指标
+    if ticker in b_df.index:
+        r = b_df.loc[ticker]
+        pcr = r.get("pcr_raw")
+        pcr_disp = f"{pcr:.3f}" if pcr else "无数据"
+        items = [
+            ("上涨日比例",     "—",
+             r.get("up_day_score", 50),   BEHAVIORAL_W["up_day_ratio"],
+             "近30日上涨日占比（>70%=情绪极端）"),
+            ("正负收益不对称", "—",
+             r.get("asym_score", 50),     BEHAVIORAL_W["return_asymmetry"],
+             "上涨日均值/跌幅绝对值——坏消息免疫程度"),
+            ("P/C Ratio",      pcr_disp,
+             r.get("pcr_score", 50),      BEHAVIORAL_W["pcr_proxy"],
+             "看跌/看涨期权比，低=市场过度乐观"),
+        ]
+        for name, raw, score, w, desc in items:
+            sf = safe_float(score, 50)
+            records.append({"维度": "行为拥挤", "子指标": name, "原始值": raw,
+                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
+                             "子项贡献": round(sf * w, 1), "说明": desc})
+
+    return records

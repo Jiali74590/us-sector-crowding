@@ -1,21 +1,24 @@
 """
-美股行业拥挤度分析 Dashboard v2.0
-五层框架：预期 / 持仓 / 交易 / 估值 / 行为
-赔率视角 · 买方研究风格
+美股行业拥挤度分析 Dashboard v2.1
+玻璃箱评分 · 五层框架 · 赔率视角
+让每一个分数都可被理解、可被验证、可被质疑。
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime
 
-from config import SECTOR_ETFS, DIMENSION_WEIGHTS, CROWDING_LEVELS
+from config import (
+    SECTOR_ETFS, DIMENSION_WEIGHTS, CROWDING_LEVELS,
+    DIMENSION_META, INDICATOR_META,
+)
 from data_fetcher import fetch_price_volume, fetch_etf_info, fetch_pcr
 from factor_engine import (
     compute_trading, compute_positioning,
     compute_valuation, compute_narrative, compute_behavioral,
+    build_scorecard,
 )
 from scoring import aggregate, commentary, get_level
 
@@ -27,61 +30,138 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── 专业暗色 CSS ─────────────────────────────────────────────────────────────
+# ─── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* 全局 */
 [data-testid="stAppViewContainer"] { background:#0a0e1a; color:#d1d9e6; }
 [data-testid="stSidebar"] { background:#0d1220; border-right:1px solid #1a2540; }
-/* metric 卡片 */
 [data-testid="metric-container"] {
     background:#111827; border:1px solid #1e3050;
     border-radius:5px; padding:10px 14px;
 }
 [data-testid="metric-container"] > div { color:#8899bb !important; font-size:11px; }
 [data-testid="metric-container"] > div > div { color:#c8d8e8 !important; font-size:20px; font-weight:600; }
-/* tabs */
 .stTabs [data-baseweb="tab-list"] { background:#0d1220; border-bottom:1px solid #1a2540; gap:0; }
 .stTabs [data-baseweb="tab"] { color:#6677aa; font-size:12px; letter-spacing:.04em; padding:8px 22px; }
 .stTabs [aria-selected="true"] { color:#00d4aa; border-bottom:2px solid #00d4aa; background:transparent; }
-/* 分隔线 */
 hr { border-color:#1a2540 !important; }
 h1,h2,h3 { color:#c8d8e8 !important; font-weight:300 !important; letter-spacing:.03em; }
-/* sidebar label */
 [data-testid="stSidebar"] label { color:#8899aa !important; font-size:12px; }
-[data-testid="stSidebar"] [data-baseweb="slider"] { margin-bottom:4px; }
-/* 数据框 */
 [data-testid="stDataFrame"] { border:1px solid #1a2540; border-radius:4px; }
-/* 小注释文字 */
 .note { color:#4a5a7a; font-size:11px; font-style:italic; }
-/* 拥挤徽章 */
 .bx { padding:2px 9px; border-radius:3px; font-size:11px; font-weight:700; }
 .bx-ex { background:#7b1e1e; color:#ffaaaa; }
 .bx-hi { background:#7b3b1e; color:#ffccaa; }
 .bx-md { background:#5a4a10; color:#ffe080; }
 .bx-lo { background:#1a4a2a; color:#88ee99; }
-/* info 卡 */
 .card { background:#111827; border:1px solid #1e3050; border-radius:5px;
         padding:12px 16px; margin-bottom:8px; line-height:1.7; }
 .card-warn { border-left:3px solid #d35400; background:#130f08; }
 .card-info { border-left:3px solid #00d4aa; background:#08130f; }
 .card-note { border-left:3px solid #5577aa; background:#080d18; }
-/* 占位标记 */
 .placeholder { color:#4a6060; font-size:10px; background:#0a1818;
                border:1px dashed #1a3a3a; border-radius:3px; padding:1px 6px; }
+
+/* ── 分数区间图例 */
+.legend-bar { display:flex; gap:0; border-radius:4px; overflow:hidden;
+              height:24px; margin:8px 0; font-size:11px; }
+.legend-seg { display:flex; align-items:center; justify-content:center;
+              flex:1; color:rgba(255,255,255,0.85); font-weight:600; }
+
+/* ── Tooltip */
+.tt { position:relative; display:inline; cursor:help; }
+.tt .tip {
+    visibility:hidden; opacity:0;
+    position:absolute; z-index:9999;
+    bottom:130%; left:0;
+    width:270px; max-width:85vw;
+    background:#1a253f; border:1px solid #2a4060;
+    border-radius:5px; padding:10px 12px;
+    font-size:11px; line-height:1.65;
+    color:#c0d0e0; box-shadow:0 6px 20px rgba(0,0,0,0.7);
+    white-space:normal; pointer-events:none;
+    transition:opacity .12s;
+}
+.tt:hover .tip { visibility:visible; opacity:1; }
+.tt-q { color:#3a5a8a; font-size:9px; vertical-align:super; margin-left:1px; }
+
+/* ── 分数分解表 */
+.bk-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+.bk-table th { color:#4a5a7a; font-size:10px; font-weight:400;
+               text-align:left; padding:3px 8px; border-bottom:1px solid #1a2540; }
+.bk-table td { padding:5px 8px; border-bottom:1px solid #111827; }
+.bk-total td { border-top:1px solid #2a3a5a !important; }
+
+/* ── 子指标行 */
+.sub-row { display:grid; grid-template-columns:140px 80px 1fr 50px 50px;
+           align-items:center; gap:8px; padding:5px 0;
+           border-bottom:1px solid #111827; font-size:12px; }
+.sub-bar-bg { background:#0d1522; border-radius:3px; height:5px; width:100%; }
+.sub-bar-fg { height:5px; border-radius:3px; }
+.dim-interp { margin-top:10px; padding:8px 12px; background:#08101e;
+              border-left:2px solid #2a5080; border-radius:3px;
+              font-size:12px; color:#8899aa; line-height:1.7; }
+.dim-meta { font-size:11px; color:#5a6a8a; margin-bottom:8px; line-height:1.6;
+            padding:6px 10px; background:#0a1020; border-radius:3px; }
+
+/* ── 方法说明页 */
+.method-section { background:#0d1220; border:1px solid #1a2540;
+                  border-radius:6px; padding:16px 20px; margin-bottom:14px; }
+.method-h { color:#00d4aa; font-size:13px; font-weight:600;
+            letter-spacing:.04em; margin-bottom:8px; }
+.method-body { color:#8899aa; font-size:12px; line-height:1.85; }
+.method-body b { color:#c8d8e8; }
+.data-status { display:inline-block; padding:2px 8px; border-radius:3px;
+               font-size:10px; font-weight:600; margin-right:4px; }
+.ds-live { background:#0d3020; color:#44ee88; border:1px solid #1a5030; }
+.ds-proxy { background:#2a2010; color:#ddaa44; border:1px solid #5a4010; }
+.ds-placeholder { background:#0a0a1a; color:#445566; border:1px dashed #2a3050; }
+
+/* ── 分数说明横幅 */
+.score-banner { padding:8px 14px; border-radius:4px; font-size:12px;
+                margin-bottom:10px; border-left:3px solid; line-height:1.6; }
 </style>
 """, unsafe_allow_html=True)
 
 # ─── 常量 / 工具 ──────────────────────────────────────────────────────────────
 PT = dict(paper_bgcolor="#0a0e1a", plot_bgcolor="#111827",
           font=dict(color="#99aabb", size=11))
-
 DIMS = ["预期拥挤", "持仓拥挤", "交易拥挤", "估值拥挤", "行为拥挤"]
+
+LEVEL_DESC = {
+    "极度拥挤": "市场预期极度饱和，继续做多的期望回报已显著下降。向上需要持续不断的超预期信息；一旦边际走弱，回撤容易被放大。",
+    "高拥挤":   "多个维度出现明显拥挤信号，赔率已不占优。该行业仍可能继续上涨，但继续加仓需要有更明确的基本面支撑。",
+    "中等拥挤": "市场结构尚稳，各维度无极端信号。当前配置赔率相对合理，但需跟踪是否出现快速积累。",
+    "低拥挤":   "资金和叙事尚未集中，赔率相对较好。主要跟踪方向是各维度是否开始同步上行。",
+}
 
 
 def badge(level: str) -> str:
     m = {"极度拥挤": "bx-ex", "高拥挤": "bx-hi", "中等拥挤": "bx-md", "低拥挤": "bx-lo"}
     return f'<span class="bx {m.get(level,"bx-lo")}">{level}</span>'
+
+
+def tt(label: str, key: str) -> str:
+    """返回带 tooltip 的 HTML span"""
+    meta = INDICATOR_META.get(key) or DIMENSION_META.get(key, {})
+    if not meta:
+        return label
+    lines = []
+    if meta.get("what"):  lines.append(f"<b>是什么：</b>{meta['what']}")
+    if meta.get("high"):  lines.append(f"<span style='color:#c07a6a'><b>高分：</b></span>{meta['high']}")
+    if meta.get("low"):   lines.append(f"<span style='color:#6aaa7a'><b>低分：</b></span>{meta['low']}")
+    if meta.get("limit"): lines.append(f"<span style='color:#6a7aaa'><b>局限：</b></span>{meta['limit']}")
+    tip = "<br>".join(lines)
+    return (f'<span class="tt">{label}'
+            f'<sup class="tt-q">?</sup>'
+            f'<span class="tip">{tip}</span></span>')
+
+
+def score_color(v: float) -> str:
+    if v >= 70: return "#c0392b"
+    if v >= 58: return "#d35400"
+    if v >= 42: return "#b7950b"
+    return "#1e8449"
 
 
 def gauge_fig(value: float, title: str) -> go.Figure:
@@ -106,7 +186,7 @@ def gauge_fig(value: float, title: str) -> go.Figure:
                            thickness=0.75, value=value),
         ),
     ))
-    fig.update_layout(height=170, margin=dict(l=15, r=15, t=40, b=10), **PT)
+    fig.update_layout(height=180, margin=dict(l=15, r=15, t=40, b=10), **PT)
     return fig
 
 
@@ -116,7 +196,7 @@ def radar_fig(dim_scores: dict, label: str, color: str = "#00d4aa") -> go.Figure
     fig  = go.Figure(go.Scatterpolar(
         r=vals, theta=cats, fill="toself",
         line=dict(color=color, width=2),
-        fillcolor=f"rgba(0,212,170,0.12)",
+        fillcolor="rgba(0,212,170,0.10)",
         name=label,
     ))
     fig.update_layout(
@@ -128,21 +208,121 @@ def radar_fig(dim_scores: dict, label: str, color: str = "#00d4aa") -> go.Figure
             angularaxis=dict(tickfont=dict(size=10, color="#8899bb"),
                              gridcolor="#1a2540", linecolor="#1a2540"),
         ),
-        paper_bgcolor="#0a0e1a", height=290,
+        paper_bgcolor="#0a0e1a", height=270,
         showlegend=False,
-        margin=dict(l=45, r=45, t=30, b=30),
+        margin=dict(l=45, r=45, t=20, b=20),
     )
     return fig
+
+
+def score_range_legend() -> str:
+    """返回分数区间图例 HTML"""
+    segs = [
+        ("#0a3a1a", "0–35", "低拥挤"),
+        ("#3a3008", "35–60", "中等"),
+        ("#5a2808", "60–80", "高拥挤"),
+        ("#6a1010", "80–100", "极度"),
+    ]
+    inner = "".join(
+        f'<div class="legend-seg" style="background:{c}">'
+        f'<span>{label}</span>&nbsp;<span style="font-weight:300;font-size:9px">{lev}</span></div>'
+        for c, label, lev in segs
+    )
+    return f'<div class="legend-bar">{inner}</div>'
+
+
+def score_breakdown_html(row: pd.Series, weights: dict) -> str:
+    """生成总分拆解表的 HTML"""
+    dims_sorted = sorted(DIMS, key=lambda d: -float(row.get(d, 50)))
+    tbody = ""
+    total_contrib = 0.0
+    for d in dims_sorted:
+        score = float(row.get(d, 50))
+        w = weights.get(d, DIMENSION_WEIGHTS.get(d, 0.2))
+        contrib = score * w
+        total_contrib += contrib
+        sc = score_color(score)
+        dim_tt = tt(d, d)
+        tbody += (
+            f"<tr>"
+            f"<td style='color:#8899bb'>{dim_tt}</td>"
+            f"<td style='color:{sc};font-weight:600;text-align:center'>{score:.1f}</td>"
+            f"<td style='color:#6677aa;text-align:center'>{w*100:.0f}%</td>"
+            f"<td style='color:#aabb88;text-align:right;font-weight:600'>{contrib:.1f}</td>"
+            f"</tr>"
+        )
+    tbody += (
+        f"<tr class='bk-total'>"
+        f"<td style='color:#c8d8e8;font-weight:600'>合计</td>"
+        f"<td></td><td></td>"
+        f"<td style='color:#00d4aa;font-weight:700;font-size:14px;text-align:right'>{total_contrib:.1f}</td>"
+        f"</tr>"
+    )
+    return (
+        f"<table class='bk-table'>"
+        f"<thead><tr>"
+        f"<th>维度</th><th style='text-align:center'>得分</th>"
+        f"<th style='text-align:center'>权重</th><th style='text-align:right'>贡献</th>"
+        f"</tr></thead>"
+        f"<tbody>{tbody}</tbody></table>"
+    )
+
+
+def dim_interpretation(dim: str, score: float, sub: dict) -> str:
+    """为每个维度自动生成一句解读"""
+    if dim == "交易拥挤":
+        rsi = sub.get("RSI(14)", 50)
+        vol = sub.get("成交量Surge", 50)
+        mom = sub.get("1M动量", 50)
+        if score >= 70:
+            drivers = []
+            if rsi >= 65: drivers.append("短期价格强势（RSI偏高）")
+            if vol >= 65: drivers.append("成交量放大")
+            if mom >= 65: drivers.append("1M涨幅偏强")
+            d = "、".join(drivers) if drivers else "多项指标共振"
+            return f"交易拥挤较高，主要来自{d}，快钱参与度上升。行业仍可能继续涨，但继续上涨需要更强新信息驱动；若催化缺席，短期有降温压力。"
+        elif score >= 50:
+            return "交易热度中等偏高，有一定动量，但尚未到极端程度。可持有，不建议此时追高重仓。"
+        else:
+            return "交易热度偏低，短期动量不强，市场对该行业交易兴趣一般，无明显过热风险。"
+    elif dim == "持仓拥挤":
+        if score >= 70:
+            return "资金持续高强度流入，持仓集中度处于历史高位。这类「慢拥挤」比价格动量拥挤更危险——方向无争议，但一旦出现踩踏，没有对手盘接。"
+        elif score >= 50:
+            return "资金流入趋势明显，中期成交量高于历史均值，持仓集中度在上升通道中。景气度不等于拥挤度，需持续跟踪。"
+        else:
+            return "资金流入温和，持仓集中度处于历史低位，未见大规模一致性建仓迹象。"
+    elif dim == "估值拥挤":
+        if score >= 70:
+            return "价格已偏离历史均值较远，市场对远期乐观预期定价相对充分。基本面好 ≠ 估值不贵；若盈利不及预期，估值回归空间大。"
+        elif score >= 50:
+            return "估值分位在历史中等偏高区间，定价尚未极端，但安全边际已有所收窄。"
+        else:
+            return "估值处于历史低分位，市场对该行业预期相对悲观，当前定价具备一定安全边际。"
+    elif dim == "预期拥挤":
+        if score >= 70:
+            return "市场叙事已高度集中，「人尽皆知」程度较高。预期一旦落空，回调没有缓冲。属于「叙事先行」型拥挤。"
+        elif score >= 50:
+            return "预期层面有升温迹象，叙事开始集中但尚未极端，值得持续跟踪是否进一步累积。"
+        else:
+            return "市场对该行业预期尚未形成集中叙事，属于被忽视或预期分散阶段，潜在赔率相对合理。"
+    elif dim == "行为拥挤":
+        if score >= 70:
+            return "市场对负面信息的反应已明显钝化：上涨日比例偏高，坏消息跌幅收窄。这是行为拥挤的危险信号——真正的风险不是利空，而是利好也涨不动。"
+        elif score >= 50:
+            return "情绪偏向乐观，上涨日占多数，但尚未到极端失控的程度。"
+        else:
+            return "市场情绪中性，对正负消息反应均衡，风险意识正常。"
+    return ""
 
 
 # ─── 数据加载 ─────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner="计算五层拥挤度…")
 def load_scores(w_tuple: tuple) -> tuple:
-    """w_tuple 是 sorted weight items，方便 cache key 哈希"""
     weights = dict(w_tuple)
     prices, volumes = fetch_price_volume()
-    info    = fetch_etf_info()
-    pcr_d   = fetch_pcr()
+    fetch_etf_info()   # warm cache
+    pcr_d = fetch_pcr()
 
     t_df = compute_trading(prices, volumes)
     p_df = compute_positioning(prices, volumes)
@@ -163,48 +343,68 @@ def sidebar():
         st.markdown(
             '<div style="color:#00d4aa;font-size:15px;font-weight:600;letter-spacing:.08em">'
             '⚡ CROWDING MONITOR</div>'
-            '<div style="color:#4a5a7a;font-size:11px;margin-bottom:12px">五层框架 · 赔率视角 v2.0</div>',
+            '<div style="color:#4a5a7a;font-size:11px;margin-bottom:12px">'
+            '五层框架 · 赔率视角 v2.1</div>',
             unsafe_allow_html=True
         )
         st.markdown("---")
         st.markdown('<div style="color:#6677aa;font-size:11px;margin-bottom:6px">维度权重（合计需=100%）</div>',
                     unsafe_allow_html=True)
-
         dw = {}
         for dim, default in [("预期拥挤",20),("持仓拥挤",20),("交易拥挤",25),
                               ("估值拥挤",20),("行为拥挤",15)]:
             dw[dim] = st.slider(dim, 0, 40, default, 5) / 100
-
         total_w = sum(dw.values())
         if abs(total_w - 1.0) > 0.01:
             st.warning(f"权重合计 {total_w:.0%}，标准为 100%")
         else:
             st.markdown('<div style="color:#1e8449;font-size:11px">✓ 权重已归一化</div>',
                         unsafe_allow_html=True)
-
         st.markdown("---")
         if st.button("🔄 刷新数据", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-
         st.markdown("---")
         st.markdown(f'<div class="note">更新: {datetime.now().strftime("%m/%d %H:%M")}</div>',
                     unsafe_allow_html=True)
         st.markdown("""
 <div style="font-size:11px;line-height:2;margin-top:8px">
-<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">价格/成交量</span><br>
-<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">RSI / 动量 / 波动率</span><br>
-<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">期权 P/C Ratio</span><br>
-<span style="color:#5a7a4a">⚠️</span> <span style="color:#4a6a4a">Beta扩张代理</span><br>
-<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">新闻热度 (占位)</span><br>
-<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">基金持仓 (占位)</span><br>
-<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">卖方覆盖 (占位)</span>
+<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">价格/成交量 (真实)</span><br>
+<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">RSI / 动量 / 波动率 (真实)</span><br>
+<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">期权 P/C Ratio (真实)</span><br>
+<span style="color:#5a7a4a">⚠️</span> <span style="color:#4a6a4a">Beta扩张 (代理指标)</span><br>
+<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">新闻热度 (占位50)</span><br>
+<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">基金持仓 (占位)</span>
 </div>""", unsafe_allow_html=True)
     return dw
 
 
 # ─── Tab 1: 总览 ─────────────────────────────────────────────────────────────
 def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
+    # 「如何理解这个分数」横幅
+    st.markdown("""
+<div style="background:#0d1525;border:1px solid #1a2a4a;border-radius:6px;
+     padding:12px 18px;margin-bottom:14px">
+  <div style="color:#00d4aa;font-size:12px;font-weight:600;margin-bottom:6px">
+    📖 如何理解这个分数？</div>
+  <div style="display:flex;gap:0;border-radius:4px;overflow:hidden;height:20px;margin-bottom:8px">
+    <div style="flex:35;background:#0a3a1a;display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#88ee88;font-weight:600">0–35 低拥挤</div>
+    <div style="flex:25;background:#2a2808;display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#ddcc44;font-weight:600">35–60 中等</div>
+    <div style="flex:20;background:#4a1e08;display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#ffaa66;font-weight:600">60–80 高拥挤</div>
+    <div style="flex:20;background:#6a0808;display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#ffaaaa;font-weight:600">80–100 极度</div>
+  </div>
+  <div style="color:#6a7a9a;font-size:11px;line-height:1.7">
+    <b style="color:#8899bb">高分不代表马上跌</b>，而代表继续上涨所需的新信息门槛在升高、赔率在下降。
+    <b style="color:#8899bb">低分不代表马上涨</b>，而代表当前不拥挤、潜在赔率相对更好。
+    这个工具判断的是「行业被市场挤得有多满」，而不是预测涨跌。
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
     avg = scores["总拥挤度"].mean()
     top3 = scores.head(3)
     bot3 = scores.tail(3)
@@ -214,8 +414,12 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     with col_g:
         st.plotly_chart(gauge_fig(avg, "市场整体拥挤温度"), use_container_width=True)
         level_now, _ = get_level(avg)
-        st.markdown(f'<div style="text-align:center;margin-top:-8px">{badge(level_now)}</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align:center;margin-top:-6px">{badge(level_now)}</div>'
+            f'<div style="text-align:center;font-size:11px;color:#5a6a7a;margin-top:6px">'
+            f'{LEVEL_DESC.get(level_now,"")[:50]}…</div>',
+            unsafe_allow_html=True
+        )
 
     with col_r:
         if "SPY" in prices.columns:
@@ -230,7 +434,6 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
                       help="最高拥挤 - 最低拥挤，越大说明行业间分化越明显")
 
         st.markdown("---")
-        # 快速热力条
         sorted_s = scores.sort_values("总拥挤度", ascending=False)
         cols_strip = st.columns(len(sorted_s))
         for i, (tk, row) in enumerate(sorted_s.iterrows()):
@@ -254,6 +457,8 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
             _, c = get_level(s)
             primary = max(DIMS, key=lambda d: float(row.get(d, 0)))
             cmt = commentary(row)
+            level_lbl = row["拥挤等级"]
+            level_desc_short = LEVEL_DESC.get(level_lbl, "")
             st.markdown(f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -261,9 +466,10 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     <span style="color:{c};font-size:22px;font-weight:700">{s:.0f}</span>
   </div>
   <div style="color:#6677aa;font-size:11px;margin-top:4px">
-    主导维度: <span style="color:#8899bb">{primary}</span> · {badge(row['拥挤等级'])}
+    主导维度: <span style="color:#8899bb">{primary}</span> · {badge(level_lbl)}
   </div>
-  <div style="color:#8a6a4a;font-size:11px;margin-top:6px;line-height:1.6">{cmt['action']}</div>
+  <div style="color:#7a8a9a;font-size:11px;margin-top:5px;line-height:1.6">{level_desc_short}</div>
+  <div style="color:#8a6a4a;font-size:11px;margin-top:6px">{cmt['action']}</div>
 </div>""", unsafe_allow_html=True)
 
     with col_cold:
@@ -281,17 +487,24 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     <span style="color:{c};font-size:22px;font-weight:700">{s:.0f}</span>
   </div>
   <div style="color:#4a7a5a;font-size:11px;margin-top:6px">{heating}</div>
+  <div style="color:#3a6a3a;font-size:11px;margin-top:4px">低拥挤阶段，做多赔率相对占优。</div>
 </div>""", unsafe_allow_html=True)
 
 
 # ─── Tab 2: 排名 ─────────────────────────────────────────────────────────────
 def tab_ranking(scores: pd.DataFrame):
-    sort_by = st.selectbox("排序维度",
-                           ["总拥挤度"] + DIMS,
-                           label_visibility="collapsed")
+    # 分数区间说明条
+    st.markdown(
+        '<div style="font-size:11px;color:#5a6a7a;margin-bottom:4px">分数区间参考：</div>'
+        + score_range_legend()
+        + '<div style="font-size:10px;color:#3a4a5a;margin-bottom:10px">'
+          '分数越高 = 该行业被市场「挤」得越满，并非预测涨跌，而是反映赔率结构</div>',
+        unsafe_allow_html=True
+    )
+
+    sort_by = st.selectbox("排序维度", ["总拥挤度"] + DIMS, label_visibility="collapsed")
     disp = scores.sort_values(sort_by, ascending=False)
 
-    # 热力图矩阵
     labels_y = [f"{SECTOR_ETFS[t]['name']}({t})" for t in disp.index]
     z = disp[DIMS].values
 
@@ -307,8 +520,7 @@ def tab_ranking(scores: pd.DataFrame):
         zmin=0, zmax=100,
         showscale=True,
         colorbar=dict(title=dict(text="得分", font=dict(size=10, color="#6677aa")),
-                      thickness=10,
-                      tickfont=dict(size=9, color="#6677aa")),
+                      thickness=10, tickfont=dict(size=9, color="#6677aa")),
         hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}<extra></extra>",
     ))
     fig.update_layout(
@@ -319,11 +531,10 @@ def tab_ranking(scores: pd.DataFrame):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # 总分横向柱状图
     sd = disp.sort_values("总拥挤度")
-    bar_labels  = [f"{SECTOR_ETFS[t]['name']}({t})" for t in sd.index]
-    bar_colors  = [get_level(v)[1] for v in sd["总拥挤度"]]
-    bar_text    = [f"{v:.0f}  {sd.loc[t,'拥挤等级']}" for t, v in zip(sd.index, sd["总拥挤度"])]
+    bar_labels = [f"{SECTOR_ETFS[t]['name']}({t})" for t in sd.index]
+    bar_colors = [get_level(v)[1] for v in sd["总拥挤度"]]
+    bar_text   = [f"{v:.0f}  {sd.loc[t,'拥挤等级']}" for t, v in zip(sd.index, sd["总拥挤度"])]
 
     fig2 = go.Figure(go.Bar(
         x=sd["总拥挤度"], y=bar_labels, orientation="h",
@@ -333,30 +544,32 @@ def tab_ranking(scores: pd.DataFrame):
         hovertemplate="<b>%{y}</b><br>总拥挤度: %{x:.1f}<extra></extra>",
     ))
     fig2.update_layout(
-        xaxis=dict(title="总拥挤度", range=[0, 110],
+        xaxis=dict(title="总拥挤度", range=[0, 115],
                    tickfont=dict(size=10, color="#6677aa")),
         height=430, margin=dict(l=160, r=100, t=20, b=40), **PT,
     )
     st.plotly_chart(fig2, use_container_width=True)
 
-    # 信号摘要表（纯文字信息密度）
     st.markdown("**快速信号表**")
     rows_out = []
     for tk, row in disp.iterrows():
         cmt = commentary(row)
+        s = float(row["总拥挤度"])
+        level_lbl = row["拥挤等级"]
         rows_out.append({
-            "行业(ETF)": f"{SECTOR_ETFS[tk]['name']}({tk})",
-            "总分": f"{row['总拥挤度']:.0f}",
-            "等级": row["拥挤等级"],
-            "主导维度": max(DIMS, key=lambda d: float(row.get(d, 0))),
-            "操作信号": cmt["action"],
+            "行业(ETF)":    f"{SECTOR_ETFS[tk]['name']}({tk})",
+            "总分":          f"{s:.0f}",
+            "等级":          level_lbl,
+            "主导维度":      max(DIMS, key=lambda d: float(row.get(d, 0))),
+            "操作信号":      cmt["action"],
+            "核心判断":      cmt["summary"][:45] + "…",
         })
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True,
                  hide_index=True, height=420)
 
 
-# ─── Tab 3: 详情 ─────────────────────────────────────────────────────────────
-def tab_detail(scores: pd.DataFrame, detail: dict):
+# ─── Tab 3: 详情（玻璃箱核心页）─────────────────────────────────────────────
+def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
     tickers = list(SECTOR_ETFS.keys())
     sel = st.selectbox("选择行业", tickers,
                        format_func=lambda t: f"{SECTOR_ETFS[t]['name']} ({t})")
@@ -368,31 +581,178 @@ def tab_detail(scores: pd.DataFrame, detail: dict):
     row   = scores.loc[sel]
     cmt   = commentary(row)
     total = float(row["总拥挤度"])
-    _, color = get_level(total)
+    level_lbl, color = get_level(total)
+    level_desc = LEVEL_DESC.get(level_lbl, "")
 
-    # ── 顶部三列
-    cg, cr, ct = st.columns([1, 1.1, 2.1])
+    # ── 分数说明横幅
+    banner_bg = {"极度拥挤": "#200808", "高拥挤": "#1a0e06",
+                 "中等拥挤": "#141008", "低拥挤": "#081408"}.get(level_lbl, "#0d1220")
+    st.markdown(
+        f'<div class="score-banner" style="background:{banner_bg};border-color:{color}">'
+        f'<b style="color:{color};font-size:16px">{total:.1f}</b>'
+        f'&nbsp; {badge(level_lbl)}&nbsp;&nbsp;'
+        f'<span style="color:#8a9aaa;font-size:12px">{level_desc}</span>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+    # ── 顶部三列：Gauge / 总分拆解 / Radar
+    cg, cb, cr = st.columns([1, 1.1, 1])
     with cg:
         st.plotly_chart(gauge_fig(total, f"{SECTOR_ETFS[sel]['name']} 总拥挤度"),
                         use_container_width=True)
         st.markdown(
-            f'<div style="text-align:center">{badge(row["拥挤等级"])}</div>'
+            f'<div style="text-align:center">{badge(level_lbl)}</div>'
             f'<div style="text-align:center;margin-top:8px;font-size:13px;color:{color}">'
             f'{cmt["action"]}</div>',
             unsafe_allow_html=True
         )
 
+    with cb:
+        st.markdown(
+            '<div style="color:#8899bb;font-size:11px;font-weight:600;margin-bottom:4px">'
+            '总分拆解 — 这个数字是怎么来的</div>',
+            unsafe_allow_html=True
+        )
+        st.markdown(score_breakdown_html(row, weights), unsafe_allow_html=True)
+        st.markdown(
+            '<div style="color:#3a4a6a;font-size:10px;margin-top:6px">'
+            '总分 = 各维度得分 × 对应权重之和。'
+            '悬停维度名查看说明。</div>',
+            unsafe_allow_html=True
+        )
+
     with cr:
         st.plotly_chart(
-            radar_fig({d: float(row.get(d,50)) for d in DIMS},
+            radar_fig({d: float(row.get(d, 50)) for d in DIMS},
                       SECTOR_ETFS[sel]["name"], color),
             use_container_width=True
         )
 
-    with ct:
-        st.markdown("**综合研判**")
+    # ── 五维可展开卡（按得分降序）
+    st.markdown("---")
+    st.markdown(
+        '<div style="color:#8899bb;font-size:12px;font-weight:600;margin-bottom:8px">'
+        '各维度详情 — 点击展开，查看子指标明细和解读</div>',
+        unsafe_allow_html=True
+    )
+
+    t_df = detail["trading"]
+    p_df = detail["positioning"]
+    v_df = detail["valuation"]
+    n_df = detail["narrative"]
+    b_df = detail["behavioral"]
+    scorecard = build_scorecard(sel, t_df, p_df, v_df, n_df, b_df)
+
+    dims_sorted = sorted(DIMS, key=lambda d: -float(row.get(d, 50)))
+    for dim in dims_sorted:
+        dim_score = float(row.get(dim, 50))
+        dim_w = weights.get(dim, DIMENSION_WEIGHTS.get(dim, 0.2))
+        dim_contrib = dim_score * dim_w
+        _, dim_color = get_level(dim_score)
+        dim_records = [r for r in scorecard if r["维度"] == dim]
+        sub_scores  = {r["子指标"]: r["历史分位"] for r in dim_records}
+        interp = dim_interpretation(dim, dim_score, sub_scores)
+        dim_meta = DIMENSION_META.get(dim, {})
+
+        expander_label = (
+            f"{dim}  ·  {dim_score:.1f} 分  ·  "
+            f"权重 {dim_w*100:.0f}%  ·  "
+            f"贡献总分 {dim_contrib:.1f} 分"
+        )
+        with st.expander(expander_label, expanded=(dim == dims_sorted[0])):
+            # 维度说明
+            if dim_meta.get("what"):
+                st.markdown(
+                    f'<div class="dim-meta">'
+                    f'<b style="color:#7a9abb">{dim}</b>：{dim_meta["what"]}'
+                    + (f'<br><span style="color:#5a6a4a">⚠ 局限：{dim_meta["limit"]}</span>'
+                       if dim_meta.get("limit") else "")
+                    + '</div>',
+                    unsafe_allow_html=True
+                )
+
+            # 子指标表格
+            rows_html = ""
+            for rec in dim_records:
+                ind_name  = rec["子指标"]
+                ind_score = rec["历史分位"]
+                ind_raw   = rec["原始值"]
+                ind_w_str = rec["维度内权重"]
+                ind_contrib = rec["子项贡献"]
+                ic = score_color(ind_score)
+                bar_w = max(3, int(ind_score))
+                name_tt = tt(ind_name, ind_name)
+                rows_html += (
+                    f"<tr>"
+                    f"<td style='color:#8899bb;width:130px'>{name_tt}</td>"
+                    f"<td style='color:#5a6a7a;font-size:10px;width:60px'>{ind_raw}</td>"
+                    f"<td style='width:100px'>"
+                    f"  <div class='sub-bar-bg'>"
+                    f"    <div class='sub-bar-fg' style='width:{bar_w}%;background:{ic}'></div>"
+                    f"  </div>"
+                    f"</td>"
+                    f"<td style='color:{ic};font-weight:600;text-align:center;width:45px'>{ind_score:.0f}</td>"
+                    f"<td style='color:#4a5a7a;text-align:center;width:40px'>{ind_w_str}</td>"
+                    f"<td style='color:#aabb88;text-align:right;width:45px'>{ind_contrib:.1f}</td>"
+                    f"<td style='color:#4a5a6a;font-size:10px;padding-left:10px'>{rec['说明']}</td>"
+                    f"</tr>"
+                )
+            st.markdown(
+                f"<table style='width:100%;border-collapse:collapse;font-size:12px'>"
+                f"<thead><tr style='color:#3a4a6a;font-size:10px;border-bottom:1px solid #1a2540'>"
+                f"<th style='text-align:left;padding:3px 0'>指标</th>"
+                f"<th style='text-align:left'>原始值</th>"
+                f"<th>分位分布</th>"
+                f"<th style='text-align:center'>得分</th>"
+                f"<th style='text-align:center'>权重</th>"
+                f"<th style='text-align:right'>贡献</th>"
+                f"<th style='text-align:left;padding-left:10px'>说明</th>"
+                f"</tr></thead>"
+                f"<tbody>{rows_html}</tbody></table>",
+                unsafe_allow_html=True
+            )
+
+            # 解读句
+            if interp:
+                st.markdown(
+                    f'<div class="dim-interp">💬 {interp}</div>',
+                    unsafe_allow_html=True
+                )
+
+    # ── 完整打分卡（折叠）
+    st.markdown("---")
+    with st.expander("📋 完整打分卡明细（可人工复核所有子指标）"):
         st.markdown(
-            f'<div class="card card-info" style="color:#b8c8d8;font-size:13px">{cmt["summary"]}</div>',
+            '<div class="note" style="margin-bottom:8px">'
+            '所有子指标统一归一化为 0-100 历史分位数分。'
+            '「子项贡献」= 历史分位 × 该指标在本维度内的权重，反映其对维度总分的贡献。</div>',
+            unsafe_allow_html=True
+        )
+        sc_df = pd.DataFrame(scorecard)
+
+        def color_pct(val):
+            try:
+                v = float(val)
+                if v >= 70: return "color:#c0392b;font-weight:600"
+                if v >= 58: return "color:#d35400"
+                if v >= 42: return "color:#b7950b"
+                return "color:#1e8449"
+            except: return "color:#4a5a6a"
+
+        st.dataframe(
+            sc_df.style.applymap(color_pct, subset=["历史分位", "子项贡献"]),
+            use_container_width=True, hide_index=True, height=500,
+        )
+
+    # ── 综合研判
+    st.markdown("---")
+    st.markdown("**综合研判**")
+    rc1, rc2 = st.columns([3, 2])
+    with rc1:
+        st.markdown(
+            f'<div class="card card-info" style="color:#b8c8d8;font-size:13px">'
+            f'{cmt["summary"]}</div>',
             unsafe_allow_html=True
         )
         if cmt["structure"]:
@@ -401,6 +761,7 @@ def tab_detail(scores: pd.DataFrame, detail: dict):
                 f'📐 结构解读<br>{cmt["structure"]}</div>',
                 unsafe_allow_html=True
             )
+    with rc2:
         st.markdown(
             f'<div class="card" style="color:#7a9aaa;font-size:12px">'
             f'📊 赔率判断<br>{cmt["odds"]}</div>',
@@ -412,93 +773,9 @@ def tab_detail(scores: pd.DataFrame, detail: dict):
             unsafe_allow_html=True
         )
 
-    st.markdown("---")
-    # ── 因子明细
-    st.markdown("**五维因子明细**")
-    records = []
-
-    t_df = detail["trading"]
-    if sel in t_df.index:
-        r = t_df.loc[sel]
-        for factor, raw_key, score_key, desc in [
-            ("RSI(14)",       "rsi_raw",      "rsi_score",          "RSI 历史分位——短期超买程度，非景气判断"),
-            ("1M动量",         "mom_1m_raw",   "mom_1m_score",       "1M收益率历史分位——高=近期涨幅偏强"),
-            ("成交量Surge",     None,           "volume_surge_score", "20日均量/252日均量，放量=交易拥挤信号"),
-            ("波动率扩张",      None,           "vol_exp_score",      "30日/90日实现波动率比，波动扩张=交易紧张"),
-            ("52W价格位置",     None,           "price_prox_score",   "当前价在52周高低点区间内的位置，100=贴近年高"),
-        ]:
-            raw_v = f"{r.get(raw_key,'—')}" if raw_key else "—"
-            records.append({"维度":"交易拥挤","因子":factor,
-                             "原始值":raw_v,"得分":r.get(score_key,"—"),"说明":desc})
-
-    p_df = detail["positioning"]
-    if sel in p_df.index:
-        r = p_df.loc[sel]
-        for factor, score_key, desc in [
-            ("成交量中期趋势","vol_trend_score","63日均量/252日均量——持续放量=持仓进入信号"),
-            ("Beta扩张",      "beta_exp_score", "近期Beta相对长期Beta，扩张=追涨资金增多"),
-            ("相对SPY资金流", "rel_flow_score", "ETF成交额/SPY成交额历史分位——资金集中度代理"),
-        ]:
-            records.append({"维度":"持仓拥挤","因子":factor,
-                             "原始值":"—","得分":r.get(score_key,"—"),"说明":desc})
-
-    v_df = detail["valuation"]
-    if sel in v_df.index:
-        r = v_df.loc[sel]
-        for factor, raw_key, score_key, desc in [
-            ("52W Z-Score",   "zscore_52w_raw","zscore_52w_score","价格偏离52周均值标准差，高=估值透支"),
-            ("价格/200日均线", None,            "pta_score",       "当前价相对200日均线分位——趋势偏离程度"),
-            ("相对SPY超额",   None,            "exc_score",       "3M超额收益历史分位——相对估值溢价代理"),
-        ]:
-            raw_v = f"{r.get(raw_key,'—')}" if raw_key else "—"
-            records.append({"维度":"估值拥挤","因子":factor,
-                             "原始值":raw_v,"得分":r.get(score_key,"—"),"说明":desc})
-
-    n_df = detail["narrative"]
-    if sel in n_df.index:
-        r = n_df.loc[sel]
-        for factor, score_key, desc in [
-            ("动量加速度","accel_score","1M收益vs3M月均——加速=叙事共振信号"),
-            ("收益偏度",  "skew_score", "近60日收益右偏=市场单边乐观，预期集中信号"),
-            ("新闻热度",  "news_score", "占位50 | 待接入新闻API/GTrends"),
-        ]:
-            score_v = r.get(score_key, "—")
-            display = f"{score_v} ⚠️占位" if factor == "新闻热度" else score_v
-            records.append({"维度":"预期拥挤","因子":factor,
-                             "原始值":"—","得分":display,"说明":desc})
-
-    b_df = detail["behavioral"]
-    if sel in b_df.index:
-        r = b_df.loc[sel]
-        pcr_raw = r.get("pcr_raw")
-        pcr_disp = f"{pcr_raw:.2f}" if pcr_raw else "无数据"
-        for factor, raw_key, score_key, desc in [
-            ("上涨日比例",     None,      "up_day_score", "近30日上涨日占比，>70%=情绪极端单边"),
-            ("正负收益不对称", None,      "asym_score",   "正/负日均值比——高=坏消息被忽视，最危险信号"),
-            ("P/C Ratio",      "pcr_raw", "pcr_score",    "看跌/看涨期权成交量比，低=市场过度乐观"),
-        ]:
-            raw_v = pcr_disp if raw_key == "pcr_raw" else "—"
-            records.append({"维度":"行为拥挤","因子":factor,
-                             "原始值":raw_v,"得分":r.get(score_key,"—"),"说明":desc})
-
-    def color_score(val):
-        try:
-            v = float(str(val).replace("⚠️占位","").strip())
-            if v >= 70: return "color:#c0392b;font-weight:600"
-            if v >= 58: return "color:#d35400"
-            if v >= 42: return "color:#b7950b"
-            return "color:#1e8449"
-        except: return "color:#4a5a6a"
-
-    rec_df = pd.DataFrame(records)
-    st.dataframe(
-        rec_df.style.applymap(color_score, subset=["得分"]),
-        use_container_width=True, hide_index=True, height=490,
-    )
-
-    st.markdown("---")
     # ── 价格走势
-    st.markdown("**价格走势（过去 12 个月，归一化 = 100）**")
+    st.markdown("---")
+    st.markdown("**价格走势（过去12个月，归一化=100）**")
     prices = detail["prices"]
     if sel in prices.columns:
         p = prices[sel].dropna().iloc[-252:]
@@ -544,7 +821,6 @@ def tab_signals(scores: pd.DataFrame):
 </div>""", unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
-
     with col1:
         st.markdown('<div style="color:#c0392b;font-size:13px;font-weight:600;margin-bottom:6px">🔴 全面拥挤（多维度共振）</div>',
                     unsafe_allow_html=True)
@@ -603,15 +879,171 @@ def tab_signals(scores: pd.DataFrame):
                 border_color="#1e4a2a")
 
     st.markdown("---")
-    st.markdown('<div class="note">⚠️ 占位提示：预期拥挤维度中「新闻热度」因子当前固定为 50（待接入新闻API或Google Trends）。接入后预期拥挤得分将更准确。</div>',
+    st.markdown('<div class="note">⚠️ 占位提示：预期拥挤维度中「新闻热度」因子当前固定为 50（待接入新闻API或Google Trends）。</div>',
                 unsafe_allow_html=True)
+
+
+# ─── Tab 5: 方法说明 ─────────────────────────────────────────────────────────
+def tab_method():
+    st.markdown(
+        '<h3 style="color:#00d4aa;font-weight:400;margin-bottom:4px">方法说明</h3>'
+        '<div style="color:#4a5a7a;font-size:12px;margin-bottom:20px">'
+        'How This Tool Works — 打分框架、数据来源与局限性</div>',
+        unsafe_allow_html=True
+    )
+
+    # ── 核心理念
+    st.markdown("""
+<div class="method-section">
+  <div class="method-h">这个工具在做什么？</div>
+  <div class="method-body">
+    <b>核心问题：这个行业被市场「挤」得有多满？</b><br><br>
+    我们把「拥挤」定义为：资金、预期、情绪、定价在一个方向上过度集中的状态。
+    这种状态下，继续上涨所需的新信息门槛在升高，一旦出现哪怕轻微的不及预期，回撤容易被放大。<br><br>
+    <b>高分不代表马上跌</b>——它代表继续做多的期望回报在下降，赔率在变差。<br>
+    <b>低分不代表马上涨</b>——它代表当前不拥挤，潜在赔率相对更好，但需要等待催化剂。<br><br>
+    这个工具的目标是帮助你判断「现在进入这个行业，赔率结构是否合理」，而不是预测涨跌。
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 五层框架
+    st.markdown("""
+<div class="method-section">
+  <div class="method-h">五层拥挤框架</div>
+  <div class="method-body">
+    我们把「拥挤」分解为五个独立维度，每个维度反映不同类型的信号：
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    dim_details = [
+        ("交易拥挤", "25%", "#c0392b",
+         "衡量近期价格动量、成交量和波动率是否出现短期过热。"
+         "包含：RSI历史分位、1M动量分位、成交量Surge、波动率扩张、52W价格位置。",
+         "交易热 ≠ 全面拥挤。如果持仓未极端、估值未透支，交易维度高分只代表短期超热。"),
+        ("持仓拥挤", "20%", "#d35400",
+         "衡量资金是否持续、集中流入该行业，形成一致性持仓。"
+         "包含：成交量中期趋势（63D/252D）、Beta扩张（30D/90D）、相对SPY资金流分位。",
+         "使用成交量趋势和Beta作为持仓集中度的间接代理，无法直接获取基金实际持仓（如13F）。"),
+        ("估值拥挤", "20%", "#b7950b",
+         "衡量市场定价是否已透支远期预期，相对历史偏贵。"
+         "包含：52W Z-Score（价格偏离年度均值）、价格/200日均线历史分位、3M相对SPY超额收益分位。",
+         "此处估值代理基于价格行为，不是真正的PE/PB等基本面估值倍数，局限性明显。"),
+        ("预期拥挤", "20%", "#2471a3",
+         "衡量市场叙事/共识是否已高度集中，「人尽皆知」的程度。"
+         "包含：动量加速度（1M vs 3M月均）、收益率偏度（近60日）、新闻热度（⚠️占位50）。",
+         "新闻热度因子当前为占位，未接入真实新闻API，影响此维度准确性。"),
+        ("行为拥挤", "15%", "#1e8449",
+         "衡量市场是否正在失去风险感：坏消息被忽视，期权市场过度乐观。"
+         "包含：近30日上涨日比例、正/负收益不对称、Put/Call Ratio。",
+         "在震荡市场中可能发出噪音信号，需结合其他维度综合判断。"),
+    ]
+
+    for dim, weight, color, desc, limit in dim_details:
+        st.markdown(f"""
+<div style="background:#0a1020;border:1px solid #1a2540;border-left:3px solid {color};
+     border-radius:5px;padding:12px 16px;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <span style="color:#c8d8e8;font-weight:600">{dim}</span>
+    <span style="color:{color};font-size:13px;font-weight:700">权重 {weight}</span>
+  </div>
+  <div style="color:#8899aa;font-size:12px;line-height:1.7;margin-bottom:6px">{desc}</div>
+  <div style="color:#4a5a6a;font-size:11px">⚠ 局限：{limit}</div>
+</div>""", unsafe_allow_html=True)
+
+    # ── 归一化方式
+    st.markdown("""
+<div class="method-section">
+  <div class="method-h">分数是怎么计算的？</div>
+  <div class="method-body">
+    <b>第一步：子指标归一化</b><br>
+    我们把每个子指标（如RSI、成交量、波动率等）统一换算成 <b>0–100 历史分位数分</b>。
+    分数越高，代表该指标当前处于历史越高的位置（即越拥挤）。
+    这样可以把不同量纲的数据（价格、成交量、RSI等）放到同一框架下比较。<br><br>
+    例如：RSI 当前值为 72，在过去252个交易日中处于第 88 百分位 → RSI 得分 = 88。<br><br>
+    <b>第二步：维度加权</b><br>
+    每个子指标在其维度内有权重，加权汇总得到维度得分（0-100）。<br><br>
+    <b>第三步：五维加权</b><br>
+    五个维度按设定权重（预期20% / 持仓20% / 交易25% / 估值20% / 行为15%）加权汇总，
+    得到总拥挤度（0-100）。权重可在侧边栏自定义。
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 分数解读
+    st.markdown("""
+<div class="method-section">
+  <div class="method-h">分数区间对应什么？</div>
+  <div class="method-body">
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    level_rows = [
+        (0, 35,   "#1e8449", "低拥挤",   "✅ 赔率较好 / 可积极关注",
+         "资金和叙事尚未集中，各维度均处于历史低分位。做多赔率相对占优，主要跟踪是否开始同步上行。"),
+        (35, 60,  "#b7950b", "中等拥挤", "👀 正常配置 / 持续跟踪",
+         "市场结构尚稳，各维度无极端信号。当前配置赔率相对合理，但需跟踪是否出现快速积累。"),
+        (60, 80,  "#d35400", "高拥挤",   "⚠️ 控制仓位 / 等待拥挤释放",
+         "多个维度出现明显拥挤信号，赔率已不占优。仍可能继续上涨，但继续加仓需更明确的基本面支撑。"),
+        (80, 100, "#c0392b", "极度拥挤", "⛔ 回避追高 / 考虑减仓",
+         "市场预期极度饱和，继续做多期望回报已显著下降。当前最大风险不是基本面证伪，而是预期过满后的边际降温。"),
+    ]
+    for lo, hi, c, lev, action, desc in level_rows:
+        st.markdown(f"""
+<div style="display:flex;gap:12px;align-items:flex-start;
+     background:#0a0e1a;border:1px solid #1a2540;border-radius:5px;
+     padding:10px 14px;margin-bottom:8px">
+  <div style="min-width:80px;text-align:center">
+    <div style="color:{c};font-size:18px;font-weight:700">{lo}–{hi}</div>
+    <div style="color:{c};font-size:11px;font-weight:600">{lev}</div>
+  </div>
+  <div>
+    <div style="color:#c8d8e8;font-size:12px;margin-bottom:4px">{action}</div>
+    <div style="color:#6a7a8a;font-size:11px;line-height:1.65">{desc}</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # ── 数据状态
+    st.markdown("""
+<div class="method-section">
+  <div class="method-h">数据来源与当前状态</div>
+  <div class="method-body">
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    data_items = [
+        ("ds-live",        "✅ 真实数据",  "价格、成交量",         "通过 yfinance 实时抓取，日频更新"),
+        ("ds-live",        "✅ 真实数据",  "RSI / 动量 / 波动率",  "基于价格数据实时计算"),
+        ("ds-live",        "✅ 真实数据",  "期权 P/C Ratio",       "从期权链实时计算，部分行业流动性不足时可能缺失"),
+        ("ds-proxy",       "⚠️ 代理指标", "Beta 扩张",            "用近期/中期 Beta 比值代理资金集中度，非直接持仓数据"),
+        ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "基于价格行为（Z-Score、MA200偏离），不是PE/PB等基本面估值"),
+        ("ds-placeholder", "🔲 占位50",   "新闻热度",             "待接入新闻API或Google Trends，当前固定50，不影响其他维度"),
+        ("ds-placeholder", "🔲 占位",     "基金持仓（13F）",      "待接入，接入后持仓拥挤维度将显著改善"),
+    ]
+    for css, status, name, note in data_items:
+        st.markdown(
+            f'<div style="padding:5px 0;border-bottom:1px solid #0d1520">'
+            f'<span class="data-status {css}">{status}</span>'
+            f'<span style="color:#8899bb;font-size:12px">{name}</span>'
+            f' — <span style="color:#4a5a6a;font-size:11px">{note}</span></div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown("")
+    st.markdown(
+        '<div class="note" style="margin-top:12px">'
+        '本工具为研究辅助工具，不构成投资建议。所有指标均基于公开市场数据计算，'
+        '历史分位数基于过去约252个交易日（约1年）的滚动窗口。</div>',
+        unsafe_allow_html=True
+    )
 
 
 # ─── 主入口 ───────────────────────────────────────────────────────────────────
 def main():
     weights = sidebar()
-
-    # 归一化权重
     tw = sum(weights.values())
     if tw > 0:
         weights = {k: v/tw for k, v in weights.items()}
@@ -627,15 +1059,19 @@ def main():
         '<h2 style="font-weight:300;letter-spacing:.04em">'
         '美股行业拥挤度分析 '
         '<span style="color:#00d4aa;font-size:13px;font-weight:400">'
-        '· 五层框架 · 赔率视角</span></h2>',
+        '· 玻璃箱评分 · 五层框架 · 赔率视角</span></h2>',
         unsafe_allow_html=True
     )
 
-    t1, t2, t3, t4 = st.tabs(["  市场总览  ", "  行业排名  ", "  行业详情  ", "  信号监控  "])
+    t1, t2, t3, t4, t5 = st.tabs([
+        "  市场总览  ", "  行业排名  ",
+        "  行业详情  ", "  信号监控  ", "  方法说明  "
+    ])
     with t1: tab_overview(scores, detail["prices"])
     with t2: tab_ranking(scores)
-    with t3: tab_detail(scores, detail)
+    with t3: tab_detail(scores, detail, weights)
     with t4: tab_signals(scores)
+    with t5: tab_method()
 
 
 if __name__ == "__main__":
