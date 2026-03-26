@@ -218,12 +218,17 @@ def compute_valuation(prices: pd.DataFrame) -> pd.DataFrame:
 
         # 价格/200日均线 历史分位
         if len(p) >= 200:
-            ma200 = p.rolling(200).mean()
-            pta_s = p / ma200
-            pta_v = safe_float(pta_s.iloc[-1])
-            pta_score = hist_pct(pta_s.dropna(), pta_v)
+            ma200    = p.rolling(200).mean()
+            pta_s    = p / ma200
+            pta_hist = pta_s.dropna()
+            pta_v    = safe_float(pta_s.iloc[-1])
+            pta_score = hist_pct(pta_hist, pta_v)
+            pta_raw  = round(pta_v, 3)
+            pta_n    = min(len(pta_hist), 252)
         else:
             pta_score = 50.0
+            pta_raw   = float("nan")
+            pta_n     = 0
 
         # 相对 SPY 3M 超额收益历史分位
         if spy_p is not None and len(p) > 63:
@@ -236,6 +241,8 @@ def compute_valuation(prices: pd.DataFrame) -> pd.DataFrame:
         rows[t] = {
             "zscore_52w_raw":   round(z_v, 2),
             "zscore_52w_score": round(z_score, 1),
+            "pta_raw":          pta_raw,
+            "pta_n":            pta_n,
             "pta_score":        pta_score,
             "exc_score":        exc_score,
         }
@@ -485,9 +492,10 @@ def build_scorecard(ticker: str,
             ("52W Z-Score",    f"{safe_float(r.get('zscore_52w_raw', 0), 0):.2f}σ",
              r.get("zscore_52w_score", 50),  VALUATION_W["zscore_52w"],
              "价格偏离52周均值的标准差倍数（Z=-3→0分，Z=+3→100分）"),
-            ("价格/200日均线", "—",
+            ("价格/200日均线",
+             f"{safe_float(r.get('pta_raw', float('nan')), float('nan')):.3f}x" if not __import__('math').isnan(safe_float(r.get('pta_raw', float('nan')), float('nan'))) else "—",
              r.get("pta_score", 50),         VALUATION_W["price_to_ma200"],
-             "价格相对200日均线历史分位——趋势偏离程度"),
+             f"价格相对200日均线的比值\uff0c在过去{int(r.get('pta_n', 0))}日历史分布中的分位"),
             ("相对SPY超额",    "—",
              r.get("exc_score", 50),         VALUATION_W["excess_vs_spy"],
              "3M超额收益历史分位——相对估值溢价代理"),
