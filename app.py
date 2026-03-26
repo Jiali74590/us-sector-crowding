@@ -275,6 +275,8 @@ TIER_BADGE = {
                'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">代理变量</span>',
     "missing": '<span style="background:#0a0a1a;color:#445566;border:1px dashed #2a3050;'
                'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">暂未接入</span>',
+    "data_missing": '<span style="background:#1a0a08;color:#ee6644;border:1px dashed #7a3020;'
+                    'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">数据缺失</span>',
 }
 
 CONFIDENCE_STYLE = {
@@ -420,8 +422,8 @@ def sidebar():
 <span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">RSI / 动量 / 波动率 (真实)</span><br>
 <span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">期权 P/C Ratio (真实)</span><br>
 <span style="color:#5a7a4a">⚠️</span> <span style="color:#4a6a4a">Beta扩张 (代理指标)</span><br>
-<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">新闻热度 (占位50)</span><br>
-<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">基金持仓 (占位)</span>
+<span style="color:#5a7a4a">⚠️</span> <span style="color:#4a6a4a">媒体热度 (代理变量)</span><br>
+<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">基金持仓 (暂未接入)</span>
 </div>""", unsafe_allow_html=True)
     return dw
 
@@ -703,14 +705,18 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
         dim_contrib = dim_score * dim_w
         _, dim_color = get_level(dim_score)
         dim_records = [r for r in scorecard if r["维度"] == dim]
-        sub_scores  = {r["子指标"]: r["历史分位"] for r in dim_records}
+        # 过滤掉 status=missing 的指标，避免 NaN 影响解读
+        sub_scores = {r["子指标"]: r["历史分位"] for r in dim_records
+                      if r.get("status") != "missing"}
         interp = dim_interpretation(dim, dim_score, sub_scores)
         dim_meta = DIMENSION_META.get(dim, {})
+        dim_comp_pct = comp["dim_completeness"].get(dim, 100)
 
         expander_label = (
             f"{dim}  ·  {dim_score:.1f} 分  ·  "
             f"权重 {dim_w*100:.0f}%  ·  "
-            f"贡献总分 {dim_contrib:.1f} 分"
+            f"贡献总分 {dim_contrib:.1f} 分  ·  "
+            f"数据 {dim_comp_pct:.0f}%"
         )
         with st.expander(expander_label, expanded=(dim == dims_sorted[0])):
             # 维度说明
@@ -724,19 +730,62 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
                     unsafe_allow_html=True
                 )
 
+            # 预期拥挤：媒体热度缺失时显示重归一化提示
+            if dim == "预期拥挤" and sel in n_df.index:
+                nr = n_df.loc[sel]
+                if bool(nr.get("news_missing", True)):
+                    aw = float(nr.get("accel_eff_w", 0.571)) * 100
+                    sw = float(nr.get("skew_eff_w", 0.429)) * 100
+                    st.markdown(
+                        f'<div style="color:#ddaa44;font-size:11px;margin-bottom:6px;'
+                        f'padding:5px 10px;background:#181208;border-radius:3px;'
+                        f'border-left:2px solid #8a7020">'
+                        f'⚠️ 媒体热度数据获取失败（不代表媒体关注度为零）— '
+                        f'本维度已按有效指标重新归一化权重：'
+                        f'动量加速度 {aw:.1f}% · 收益偏度 {sw:.1f}%</div>',
+                        unsafe_allow_html=True
+                    )
+
             # 子指标表格
             rows_html = ""
             for rec in dim_records:
-                ind_name  = rec["子指标"]
-                ind_score = rec["历史分位"]
-                ind_raw   = rec["原始值"]
-                ind_w_str = rec["维度内权重"]
+                ind_name    = rec["子指标"]
+                ind_raw     = rec["原始值"]
+                ind_w_str   = rec["维度内权重"]
                 ind_contrib = rec["子项贡献"]
-                ic = score_color(ind_score)
+                status      = rec.get("status", "ok")
+                name_tt     = tt(ind_name, ind_name)
+
+                if status == "missing":
+                    rows_html += (
+                        f"<tr style='opacity:0.6'>"
+                        f"<td style='color:#8899bb;width:130px'>"
+                        f"  {name_tt}&nbsp;{TIER_BADGE['data_missing']}</td>"
+                        f"<td style='color:#ee6644;font-size:10px;width:60px'>N/A</td>"
+                        f"<td style='width:100px'><div class='sub-bar-bg'></div></td>"
+                        f"<td style='color:#4a5a7a;text-align:center;width:45px;font-size:10px'>—</td>"
+                        f"<td style='color:#4a5a7a;text-align:center;width:40px'>{ind_w_str}</td>"
+                        f"<td style='color:#4a5a7a;text-align:right;width:45px'>—</td>"
+                        f"<td style='color:#ee6644;font-size:10px;padding-left:10px'>{rec['说明']}</td>"
+                        f"</tr>"
+                    )
+                    continue
+
+                ind_score = rec["历史分位"]
+                ic    = score_color(ind_score)
                 bar_w = max(3, int(ind_score))
-                name_tt = tt(ind_name, ind_name)
-                tier = INDICATOR_QUALITY.get(ind_name, {}).get("tier", "real")
-                tier_html = TIER_BADGE.get(tier, "")
+                ind_q = INDICATOR_QUALITY.get(ind_name, {})
+                tier  = ind_q.get("tier", "real")
+                proxy_note = ind_q.get("proxy_note", "")
+                if tier == "proxy" and proxy_note:
+                    tier_html = (
+                        '<span class="tt" style="display:inline">'
+                        + TIER_BADGE["proxy"]
+                        + f'<span class="tip" style="width:300px">{proxy_note}</span>'
+                        + '</span>'
+                    )
+                else:
+                    tier_html = TIER_BADGE.get(tier, "")
                 rows_html += (
                     f"<tr>"
                     f"<td style='color:#8899bb;width:130px'>{name_tt}&nbsp;{tier_html}</td>"

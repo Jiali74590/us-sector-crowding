@@ -257,21 +257,32 @@ def compute_valuation(prices: pd.DataFrame) -> pd.DataFrame:
 def compute_narrative(prices: pd.DataFrame, news_counts: Dict = None) -> pd.DataFrame:
     """
     衡量市场叙事/预期是否已高度集中：
-    - 动量加速度：1M收益 vs 3M月均收益（加速 = 叙事共振）— 真实数据
+    - 动量加速度：1M收益 vs 3M月均收益 — 真实数据
     - 收益率正偏度：近60日收益右偏 = 市场单边乐观 — 真实数据
     - 媒体热度代理：yfinance 新闻条目数跨行业横截面分位 — 代理变量
 
-    news_counts: fetch_news_count() 的输出，缺失时媒体热度回退至 50。
+    关键原则：
+    - has_data=False（抓取失败） → news_score=NaN，不参与评分，不视为0
+    - count_7d=0 且 has_data=True（真实没有新闻） → 正常评分0分
+    - 媒体热度缺失时：剩余两项指标权重重新归一化，维度得分仍有意义
     """
-    # ── 预先计算新闻横截面排名（跨 ticker）
+    # ── 预先处理新闻数据（只用 has_data=True 的 ticker 做横截面排名）
     if news_counts is not None:
-        counts_7d = {t: (news_counts.get(t) or {}).get("count_7d", 0) or 0
-                     for t in SECTOR_ETFS}
-        all_counts = list(counts_7d.values())
-        n_tickers  = len(all_counts)
+        news_has_data = {
+            t: bool((news_counts.get(t) or {}).get("has_data", False))
+            for t in SECTOR_ETFS
+        }
+        valid_counts = {
+            t: int((news_counts.get(t) or {}).get("count_7d", 0) or 0)
+            for t in SECTOR_ETFS if news_has_data.get(t, False)
+        }
+        all_counts = list(valid_counts.values())
+        n_valid = len(all_counts)
     else:
-        counts_7d  = {}
-        n_tickers  = 0
+        news_has_data = {}
+        valid_counts  = {}
+        all_counts    = []
+        n_valid       = 0
 
     rows = {}
     for t in SECTOR_ETFS:
@@ -293,35 +304,54 @@ def compute_narrative(prices: pd.DataFrame, news_counts: Dict = None) -> pd.Data
         else:
             skew_score = 50.0
 
-        # 媒体热度代理（横截面分位：该行业新闻数 vs 所有行业）
-        if n_tickers > 1 and counts_7d:
-            cnt = counts_7d.get(t, 0)
+        # 媒体热度代理：区分"真实0条"和"数据缺失"
+        this_has_data = news_has_data.get(t, False)
+        if this_has_data and n_valid >= 1:
+            cnt = valid_counts.get(t, 0)
             rank = sum(1 for x in all_counts if x < cnt)
-            news_score    = round(rank / n_tickers * 100, 1)
-            news_raw      = f"{cnt}条/7天"
-            news_is_proxy = True
+            news_score   = round(rank / n_valid * 100, 1)
+            news_raw     = f"{cnt}条/7天"
+            news_missing = False
         else:
-            news_score    = 50.0
-            news_raw      = "数据获取中"
-            news_is_proxy = False
+            news_score   = np.nan   # 显式NaN，不是0
+            news_raw     = "N/A"
+            news_missing = True
+
+        # 预期拥挤：媒体热度缺失时重新归一化剩余指标权重
+        w_a = NARRATIVE_W["momentum_accel"]
+        w_s = NARRATIVE_W["return_skew"]
+        w_n = NARRATIVE_W["news_proxy"]
+        if news_missing:
+            total_w     = w_a + w_s
+            narr_score  = (accel_score * w_a + skew_score * w_s) / total_w
+            accel_eff_w = round(w_a / total_w, 4)
+            skew_eff_w  = round(w_s / total_w, 4)
+            news_eff_w  = 0.0
+        else:
+            narr_score  = accel_score * w_a + skew_score * w_s + news_score * w_n
+            accel_eff_w = w_a
+            skew_eff_w  = w_s
+            news_eff_w  = w_n
 
         rows[t] = {
-            "accel_score":    round(accel_score, 1),
-            "skew_score":     round(skew_score, 1),
-            "news_score":     news_score,
-            "news_raw":       news_raw,
-            "news_is_proxy":  news_is_proxy,
+            "accel_score":  round(accel_score, 1),
+            "skew_score":   round(skew_score, 1),
+            "news_score":   news_score,       # float 或 np.nan
+            "news_raw":     news_raw,
+            "news_missing": news_missing,
+            "accel_eff_w":  accel_eff_w,
+            "skew_eff_w":   skew_eff_w,
+            "news_eff_w":   news_eff_w,
+            "_narr_score":  round(narr_score, 1),
         }
 
     df = pd.DataFrame(rows).T
-    for c in ["accel_score", "skew_score", "news_score"]:
-        df[c] = df[c].astype(float)
+    for c in ["accel_score", "skew_score", "accel_eff_w", "skew_eff_w",
+              "news_eff_w", "_narr_score"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    df["预期拥挤"] = (
-        df["accel_score"] * NARRATIVE_W["momentum_accel"] +
-        df["skew_score"]  * NARRATIVE_W["return_skew"]    +
-        df["news_score"]  * NARRATIVE_W["news_proxy"]
-    ).round(1)
+    df["预期拥挤"] = df["_narr_score"].round(1)
+    df = df.drop(columns=["_narr_score"])
     return df
 
 
@@ -424,7 +454,8 @@ def build_scorecard(ticker: str,
             sf = safe_float(score, 50)
             records.append({"维度": "交易拥挤", "子指标": name, "原始值": raw,
                              "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
-                             "子项贡献": round(sf * w, 1), "说明": desc})
+                             "子项贡献": round(sf * w, 1), "说明": desc,
+                             "status": "ok"})
 
     # ── 持仓拥挤子指标
     if ticker in p_df.index:
@@ -444,7 +475,8 @@ def build_scorecard(ticker: str,
             sf = safe_float(score, 50)
             records.append({"维度": "持仓拥挤", "子指标": name, "原始值": raw,
                              "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
-                             "子项贡献": round(sf * w, 1), "说明": desc})
+                             "子项贡献": round(sf * w, 1), "说明": desc,
+                             "status": "ok"})
 
     # ── 估值拥挤子指标
     if ticker in v_df.index:
@@ -464,27 +496,51 @@ def build_scorecard(ticker: str,
             sf = safe_float(score, 50)
             records.append({"维度": "估值拥挤", "子指标": name, "原始值": raw,
                              "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
-                             "子项贡献": round(sf * w, 1), "说明": desc})
+                             "子项贡献": round(sf * w, 1), "说明": desc,
+                             "status": "ok"})
 
     # ── 预期拥挤子指标
     if ticker in n_df.index:
         r = n_df.loc[ticker]
-        items = [
-            ("动量加速度", "—",
-             r.get("accel_score", 50),  NARRATIVE_W["momentum_accel"],
-             "1M收益vs3M月均——叙事共振加速信号"),
-            ("收益偏度",   "—",
-             r.get("skew_score", 50),   NARRATIVE_W["return_skew"],
-             "近60日收益右偏度——单边乐观程度"),
-            ("媒体热度代理", r.get("news_raw", "获取中"),
-             r.get("news_score", 50),   NARRATIVE_W["news_proxy"],
-             "yfinance新闻条目数跨行业横截面分位，衡量相对媒体关注度"),
-        ]
-        for name, raw, score, w, desc in items:
+        news_missing = bool(r.get("news_missing", True))
+        accel_eff_w  = float(r.get("accel_eff_w", NARRATIVE_W["momentum_accel"]))
+        skew_eff_w   = float(r.get("skew_eff_w",  NARRATIVE_W["return_skew"]))
+        news_eff_w   = float(r.get("news_eff_w",  NARRATIVE_W["news_proxy"]))
+        renorm_sfx   = "（已重新归一化权重）" if news_missing else ""
+
+        for name, raw, score, w, desc in [
+            ("动量加速度", "—", r.get("accel_score", 50), accel_eff_w,
+             "1M收益vs3M月均——叙事共振加速信号" + renorm_sfx),
+            ("收益偏度",   "—", r.get("skew_score", 50),  skew_eff_w,
+             "近60日收益右偏度——单边乐观程度" + renorm_sfx),
+        ]:
             sf = safe_float(score, 50)
             records.append({"维度": "预期拥挤", "子指标": name, "原始值": raw,
-                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
-                             "子项贡献": round(sf * w, 1), "说明": desc})
+                             "历史分位": round(sf, 1), "维度内权重": f"{w*100:.1f}%",
+                             "子项贡献": round(sf * w, 1), "说明": desc,
+                             "status": "ok"})
+
+        if news_missing:
+            records.append({
+                "维度": "预期拥挤", "子指标": "媒体热度代理",
+                "原始值": "N/A",
+                "历史分位": float("nan"),
+                "维度内权重": "0%（缺失）",
+                "子项贡献": 0.0,
+                "说明": "数据获取失败，不代表媒体关注度为零 — 该项不参与本次评分",
+                "status": "missing",
+            })
+        else:
+            ns = safe_float(r.get("news_score"), 50)
+            records.append({
+                "维度": "预期拥挤", "子指标": "媒体热度代理",
+                "原始值": str(r.get("news_raw", "—")),
+                "历史分位": round(ns, 1),
+                "维度内权重": f"{news_eff_w*100:.0f}%",
+                "子项贡献": round(ns * news_eff_w, 1),
+                "说明": "yfinance新闻条目数跨行业横截面分位，衡量相对媒体关注度",
+                "status": "ok",
+            })
 
     # ── 行为拥挤子指标
     if ticker in b_df.index:
@@ -506,7 +562,8 @@ def build_scorecard(ticker: str,
             sf = safe_float(score, 50)
             records.append({"维度": "行为拥挤", "子指标": name, "原始值": raw,
                              "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
-                             "子项贡献": round(sf * w, 1), "说明": desc})
+                             "子项贡献": round(sf * w, 1), "说明": desc,
+                             "status": "ok"})
 
     return records
 
@@ -532,11 +589,10 @@ def compute_completeness(ticker: str,
     # 各维度完整度：以 INDICATOR_QUALITY 质量分 × 维度内权重 加权计算
     # 行为拥挤：若 PCR 实际缺失，P/C Ratio 质量降为 0
     pcr_missing = (pcr_data is None) or (pcr_data.get(ticker) is None)
-    # 预期拥挤：媒体热度是否来自真实抓取
-    news_is_proxy = True  # 即使有数据也是代理变量
-    news_missing  = False
+    # 预期拥挤：媒体热度数据是否成功抓取（True=失败/缺失，False=有效数据）
+    news_missing = True   # 默认缺失
     if ticker in n_df.index:
-        news_missing = not bool(n_df.loc[ticker].get("news_is_proxy", False))
+        news_missing = bool(n_df.loc[ticker].get("news_missing", True))
 
     dim_comp = {}
     missing_items = []
