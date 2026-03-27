@@ -12,7 +12,7 @@ from datetime import datetime
 
 from config import (
     SECTOR_ETFS, DIMENSION_WEIGHTS, CROWDING_LEVELS,
-    DIMENSION_META, INDICATOR_META, INDICATOR_QUALITY,
+    DIMENSION_META, INDICATOR_META, INDICATOR_QUALITY, CATEGORY_ORDER,
 )
 from data_fetcher import fetch_price_volume, fetch_etf_info, fetch_pcr, fetch_news_count
 from factor_engine import (
@@ -560,8 +560,25 @@ def tab_ranking(scores: pd.DataFrame):
         unsafe_allow_html=True
     )
 
-    sort_by = st.selectbox("排序维度", ["总拥挤度"] + DIMS, label_visibility="collapsed")
-    disp = scores.sort_values(sort_by, ascending=False)
+    rc1, rc2 = st.columns([1, 3])
+    with rc1:
+        sort_by = st.selectbox("排序维度", ["总拥挤度"] + DIMS, label_visibility="collapsed")
+    with rc2:
+        cats_available = [c for c in CATEGORY_ORDER if any(
+            SECTOR_ETFS[t]["category"] == c for t in scores.index
+        )]
+        sel_cats = st.multiselect(
+            "筛选类别", cats_available, default=cats_available, key="rank_cats",
+            label_visibility="collapsed",
+        )
+    if sel_cats:
+        mask = scores.index.map(lambda t: SECTOR_ETFS[t]["category"]).isin(sel_cats)
+        disp = scores[mask].sort_values(sort_by, ascending=False)
+    else:
+        disp = scores.sort_values(sort_by, ascending=False)
+
+    n_rows = max(len(disp), 1)
+    chart_h = max(380, n_rows * 34)
 
     labels_y = [f"{SECTOR_ETFS[t]['name']}({t})" for t in disp.index]
     z = disp[DIMS].values
@@ -582,7 +599,7 @@ def tab_ranking(scores: pd.DataFrame):
         hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}<extra></extra>",
     ))
     fig.update_layout(
-        height=430, margin=dict(l=160, r=60, t=30, b=30),
+        height=chart_h, margin=dict(l=170, r=60, t=30, b=30),
         xaxis=dict(side="top", tickfont=dict(size=11, color="#8899aa")),
         yaxis=dict(tickfont=dict(size=10, color="#c8d8e8")),
         **PT,
@@ -604,7 +621,7 @@ def tab_ranking(scores: pd.DataFrame):
     fig2.update_layout(
         xaxis=dict(title="总拥挤度", range=[0, 115],
                    tickfont=dict(size=10, color="#6677aa")),
-        height=430, margin=dict(l=160, r=100, t=20, b=40), **PT,
+        height=chart_h, margin=dict(l=170, r=100, t=20, b=40), **PT,
     )
     st.plotly_chart(fig2, use_container_width=True)
 
@@ -628,9 +645,19 @@ def tab_ranking(scores: pd.DataFrame):
 
 # ─── Tab 3: 详情（玻璃箱核心页）─────────────────────────────────────────────
 def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
-    tickers = list(SECTOR_ETFS.keys())
-    sel = st.selectbox("选择行业", tickers,
-                       format_func=lambda t: f"{SECTOR_ETFS[t]['name']} ({t})")
+    cats_available = [c for c in CATEGORY_ORDER if any(
+        SECTOR_ETFS[t]["category"] == c for t in SECTOR_ETFS
+    )]
+    dc1, dc2 = st.columns([1, 2])
+    with dc1:
+        cat_sel = st.selectbox("类别", cats_available, key="detail_cat")
+    with dc2:
+        cat_tickers = [t for t in SECTOR_ETFS if SECTOR_ETFS[t]["category"] == cat_sel]
+        sel = st.selectbox(
+            "选择行业/主题", cat_tickers,
+            format_func=lambda t: f"{SECTOR_ETFS[t]['name']} ({t}) — {SECTOR_ETFS[t]['desc']}",
+            key="detail_etf",
+        )
 
     if sel not in scores.index:
         st.error("数据暂不可用")
@@ -1098,7 +1125,7 @@ def tab_method():
         ("估值拥挤", "20%", "#b7950b",
          "衡量市场定价是否已透支远期预期，相对历史偏贵。"
          "包含：52W Z-Score（价格偏离年度均值）、3M相对SPY超额收益分位、PE/PB横截面代理。",
-         "PE/PB 来自 yfinance 点值，做11行业横截面分位排名，非历史时间序列分位，精度有限。"),
+         "PE/PB 来自 yfinance 点值，做全量ETF横截面分位排名，非历史时间序列分位，精度有限。"),
         ("广度与领导权", "20%", "#6a3a9a",
          "衡量拥挤结构是否正在内部松动：ETF距近期高点回撤、趋势均线一致性、短长期动量背离。高分=广度恶化。",
          "无法直接获取板块内个股数据，使用ETF级别的价格结构作为广度代理，精确度有限。"),
@@ -1186,8 +1213,8 @@ def tab_method():
         ("ds-live",        "✅ 真实数据",  "RSI / 动量 / 波动率",  "基于价格数据实时计算"),
         ("ds-live",        "✅ 真实数据",  "期权 P/C Ratio",       "从期权链实时计算，部分行业流动性不足时可能缺失"),
         ("ds-proxy",       "⚠️ 代理指标", "Beta 扩张",            "用近期/中期 Beta 比值代理资金集中度，非直接持仓数据"),
-        ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "Z-Score/超额收益为价格行为代理；PE/PB取自yfinance，做11行业横截面排名"),
-        ("ds-proxy",       "⚠️ 代理指标", "媒体热度代理",         "yfinance新闻条目数量横截面排名（11个行业互比），衡量相对媒体关注度"),
+        ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "Z-Score/超额收益为价格行为代理；PE/PB取自yfinance，做全量ETF横截面排名"),
+        ("ds-proxy",       "⚠️ 代理指标", "媒体热度代理",         "yfinance新闻条目数量横截面排名（全量ETF互比），衡量相对媒体关注度"),
         ("ds-placeholder", "🔲 暂未接入", "基金持仓（13F）",      "待接入，接入后持仓拥挤维度将显著改善"),
     ]
     for css, status, name, note in data_items:

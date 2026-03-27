@@ -4,18 +4,46 @@
 """
 
 SECTOR_ETFS = {
-    "XLK":  {"name": "科技",       "desc": "Technology"},
-    "XLF":  {"name": "金融",       "desc": "Financials"},
-    "XLE":  {"name": "能源",       "desc": "Energy"},
-    "XLV":  {"name": "医疗",       "desc": "Health Care"},
-    "XLY":  {"name": "非必需消费",  "desc": "Consumer Discretionary"},
-    "XLP":  {"name": "必需消费",    "desc": "Consumer Staples"},
-    "XLI":  {"name": "工业",       "desc": "Industrials"},
-    "XLB":  {"name": "材料",       "desc": "Materials"},
-    "XLU":  {"name": "公用事业",    "desc": "Utilities"},
-    "XLRE": {"name": "房地产",     "desc": "Real Estate"},
-    "XLC":  {"name": "通信服务",    "desc": "Comm. Services"},
+    # ── 标准 SPDR 行业（11个，S&P 官方分类）────────────────────────────────────
+    "XLK":  {"name": "科技",        "desc": "Technology",              "category": "标准行业"},
+    "XLF":  {"name": "金融",        "desc": "Financials",              "category": "标准行业"},
+    "XLE":  {"name": "能源",        "desc": "Energy",                  "category": "标准行业"},
+    "XLV":  {"name": "医疗",        "desc": "Health Care",             "category": "标准行业"},
+    "XLY":  {"name": "非必需消费",  "desc": "Consumer Discretionary",  "category": "标准行业"},
+    "XLP":  {"name": "必需消费",    "desc": "Consumer Staples",        "category": "标准行业"},
+    "XLI":  {"name": "工业",        "desc": "Industrials",             "category": "标准行业"},
+    "XLB":  {"name": "材料",        "desc": "Materials",               "category": "标准行业"},
+    "XLU":  {"name": "公用事业",    "desc": "Utilities",               "category": "标准行业"},
+    "XLRE": {"name": "房地产",      "desc": "Real Estate",             "category": "标准行业"},
+    "XLC":  {"name": "通信服务",    "desc": "Comm. Services",          "category": "标准行业"},
+
+    # ── AI 与科技主题（跨越 XLK/XLC/XLY，专注细分赛道）────────────────────────
+    "QQQ":  {"name": "纳指100",     "desc": "NASDAQ-100 (Invesco)",    "category": "AI与科技"},
+    "SOXX": {"name": "半导体",      "desc": "Semiconductors (iShares)","category": "AI与科技"},
+    "IGV":  {"name": "软件/SaaS",   "desc": "Tech-Software (iShares)", "category": "AI与科技"},
+    "CLOU": {"name": "云计算",      "desc": "Cloud Computing (Global X)","category": "AI与科技"},
+    "CIBR": {"name": "网络安全",    "desc": "Cybersecurity (First Trust)","category": "AI与科技"},
+    "BOTZ": {"name": "AI机器人",    "desc": "Robotics & AI (Global X)","category": "AI与科技"},
+    "MAGS": {"name": "七巨头",      "desc": "Magnificent Seven (Roundhill)","category": "AI与科技"},
+
+    # ── 医疗细分 ──────────────────────────────────────────────────────────────
+    "IBB":  {"name": "生物科技",    "desc": "Biotechnology (iShares)", "category": "医疗细分"},
+    "XBI":  {"name": "生物科技EW",  "desc": "S&P Biotech Equal-Wt",   "category": "医疗细分"},
+
+    # ── 金融细分 ──────────────────────────────────────────────────────────────
+    "KRE":  {"name": "区域银行",    "desc": "Regional Banking (SPDR)", "category": "金融细分"},
+    "FINX": {"name": "金融科技",    "desc": "Global X FinTech",        "category": "金融细分"},
+
+    # ── 能源细分 ──────────────────────────────────────────────────────────────
+    "ICLN": {"name": "清洁能源",    "desc": "Global Clean Energy",     "category": "能源细分"},
+
+    # ── 其他主题 ──────────────────────────────────────────────────────────────
+    "ITA":  {"name": "航空航天/国防","desc": "US Aerospace & Defense", "category": "其他主题"},
+    "XRT":  {"name": "零售",        "desc": "S&P Retail (SPDR)",       "category": "其他主题"},
 }
+
+# 类别显示顺序
+CATEGORY_ORDER = ["标准行业", "AI与科技", "医疗细分", "金融细分", "能源细分", "其他主题"]
 
 # ── 六维拥挤度权重（合计=1，出清状态不进拥挤分数）────────────────────────────
 DIMENSION_WEIGHTS = {
@@ -191,7 +219,7 @@ INDICATOR_QUALITY = {
         "proxy_note": (
             "<b>代理目标：</b>基本面估值水平相对同业的高低<br>"
             "<b>计算方式：</b>取各行业ETF的 trailingPE 和 priceToBook（来自yfinance），"
-            "在11个行业横截面中计算分位排名，映射到0-100分<br>"
+            "在全量ETF横截面中计算分位排名，映射到0-100分<br>"
             "<b>局限：</b>yfinance PE/PB 为ETF层面数据，精度有限；点值横截面非历史分位"
         ),
     },
@@ -201,7 +229,7 @@ INDICATOR_QUALITY = {
         "tier": "proxy", "quality": 0.6,
         "proxy_note": (
             "<b>代理目标：</b>叙事传播速度/市场共识集中度<br>"
-            "<b>计算方式：</b>用 yfinance 抓取各行业ETF近7天新闻条目数，在11个行业间横截面排名，映射到 0–100<br>"
+            "<b>计算方式：</b>用 yfinance 抓取各ETF近7天新闻条目数，在全量ETF横截面排名，映射到 0–100<br>"
             "<b>数据稳定性：</b>yfinance新闻接口不稳定，返回条数有限（通常10-20条），可能无法正常抓取<br>"
             "<b>缺失处理：</b>抓取失败时显示 N/A，不参与评分；剩余指标自动重新归一化权重"
         ),
@@ -310,7 +338,7 @@ INDICATOR_META = {
         "limit": "超额收益高可能是基本面改善驱动，也可能是资金追捧驱动，需区分。",
     },
     "PE/PB代理": {
-        "what": "行业ETF的 trailingPE 和 priceToBook 在11个行业横截面中的分位排名（0=最便宜，100=最贵）。",
+        "what": "ETF的 trailingPE 和 priceToBook 在全量ETF横截面中的分位排名（0=最便宜，100=最贵）。",
         "high": "当前 PE/PB 在所有行业中处于高位，相对估值偏贵。",
         "low":  "当前 PE/PB 在所有行业中处于低位，相对估值偏低。",
         "limit": "横截面排名（非历史时间序列分位），PE/PB 数据来自 yfinance，精度有限。",
@@ -328,7 +356,7 @@ INDICATOR_META = {
         "limit": "偏度受样本量影响较大，60日窗口可能不足以稳定估计真实偏度。",
     },
     "媒体热度代理": {
-        "what": "基于 yfinance 新闻条目数的媒体关注度代理，在11个行业间横截面排名。",
+        "what": "基于 yfinance 新闻条目数的媒体关注度代理，在全量ETF横截面排名。",
         "high": "该行业近期新闻条目相对其他行业更多，媒体关注度偏高，叙事传播加速信号。",
         "low":  "近期媒体报道相对较少，该行业在当前市场中属于被忽视阶段。",
         "limit": "横截面排名，反映相对关注度而非绝对热度。yfinance 新闻接口不稳定。",
