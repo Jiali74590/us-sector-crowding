@@ -1,6 +1,6 @@
 """
-美股行业拥挤度分析 Dashboard v2.1
-玻璃箱评分 · 五层框架 · 赔率视角
+美股行业拥挤度分析 Dashboard v3.0
+玻璃箱评分 · 六层框架 · 拥挤+出清 · 赔率视角
 让每一个分数都可被理解、可被验证、可被质疑。
 """
 
@@ -17,7 +17,8 @@ from config import (
 from data_fetcher import fetch_price_volume, fetch_etf_info, fetch_pcr, fetch_news_count
 from factor_engine import (
     compute_trading, compute_positioning,
-    compute_valuation, compute_narrative, compute_behavioral,
+    compute_valuation, compute_narrative,
+    compute_breadth, compute_clearance,
     build_scorecard, compute_completeness,
 )
 from scoring import aggregate, commentary, get_level
@@ -126,7 +127,7 @@ h1,h2,h3 { color:#c8d8e8 !important; font-weight:300 !important; letter-spacing:
 # ─── 常量 / 工具 ──────────────────────────────────────────────────────────────
 PT = dict(paper_bgcolor="#0a0e1a", plot_bgcolor="#111827",
           font=dict(color="#99aabb", size=11))
-DIMS = ["预期拥挤", "持仓拥挤", "交易拥挤", "估值拥挤", "行为拥挤"]
+DIMS = ["叙事拥挤", "持仓拥挤", "交易拥挤", "估值拥挤", "广度与领导权"]
 
 LEVEL_DESC = {
     "极度拥挤": "市场预期极度饱和，继续做多的期望回报已显著下降。向上需要持续不断的超预期信息；一旦边际走弱，回撤容易被放大。",
@@ -347,41 +348,42 @@ def dim_interpretation(dim: str, score: float, sub: dict) -> str:
             return "估值分位在历史中等偏高区间，定价尚未极端，但安全边际已有所收窄。"
         else:
             return "估值处于历史低分位，市场对该行业预期相对悲观，当前定价具备一定安全边际。"
-    elif dim == "预期拥挤":
+    elif dim == "叙事拥挤":
         if score >= 70:
-            return "市场叙事已高度集中，「人尽皆知」程度较高。预期一旦落空，回调没有缓冲。属于「叙事先行」型拥挤。"
+            return "市场叙事已高度集中，「人尽皆知」程度较高，期权市场也偏向乐观。预期一旦落空，回调没有缓冲。属于「叙事先行」型拥挤。"
         elif score >= 50:
-            return "预期层面有升温迹象，叙事开始集中但尚未极端，值得持续跟踪是否进一步累积。"
+            return "叙事层面有升温迹象，动量加速且期权市场偏向看涨，但尚未极端，值得持续跟踪是否进一步累积。"
         else:
             return "市场对该行业预期尚未形成集中叙事，属于被忽视或预期分散阶段，潜在赔率相对合理。"
-    elif dim == "行为拥挤":
+    elif dim == "广度与领导权":
         if score >= 70:
-            return "市场对负面信息的反应已明显钝化：上涨日比例偏高，坏消息跌幅收窄。这是行为拥挤的危险信号——真正的风险不是利空，而是利好也涨不动。"
+            return "广度已出现明显恶化：ETF距近期高点有明显回撤，趋势均线一致性下降，短期动量弱于中期。这是拥挤松动的早期信号，需警惕结构进一步分裂。"
         elif score >= 50:
-            return "情绪偏向乐观，上涨日占多数，但尚未到极端失控的程度。"
+            return "广度开始出现轻微恶化迹象，ETF内部趋势一致性下降但尚未极端，值得跟踪是否继续恶化。"
         else:
-            return "市场情绪中性，对正负消息反应均衡，风险意识正常。"
+            return "广度良好，ETF仍在近期高位附近，趋势均线稳定，内部结构未出现明显松动。"
     return ""
 
 
 # ─── 数据加载 ─────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600, show_spinner="计算五层拥挤度…")
+@st.cache_data(ttl=3600, show_spinner="计算六层拥挤度…")
 def load_scores(w_tuple: tuple) -> tuple:
-    weights = dict(w_tuple)
+    weights  = dict(w_tuple)
     prices, volumes = fetch_price_volume()
-    fetch_etf_info()   # warm cache
+    info_d   = fetch_etf_info()
     pcr_d    = fetch_pcr()
     news_d   = fetch_news_count()
 
-    t_df = compute_trading(prices, volumes)
-    p_df = compute_positioning(prices, volumes)
-    v_df = compute_valuation(prices)
-    n_df = compute_narrative(prices, news_d)
-    b_df = compute_behavioral(prices, pcr_d)
+    t_df  = compute_trading(prices, volumes)
+    p_df  = compute_positioning(prices, volumes)
+    v_df  = compute_valuation(prices, info_d)
+    n_df  = compute_narrative(prices, news_d, pcr_d)
+    br_df = compute_breadth(prices)
+    cl_df = compute_clearance(prices)
 
-    scores = aggregate(t_df, p_df, v_df, n_df, b_df, weights)
+    scores = aggregate(t_df, p_df, v_df, n_df, br_df, cl_df, weights)
     detail = dict(trading=t_df, positioning=p_df, valuation=v_df,
-                  narrative=n_df, behavioral=b_df,
+                  narrative=n_df, breadth=br_df, clearance=cl_df,
                   prices=prices, volumes=volumes, pcr=pcr_d)
     return scores, detail
 
@@ -393,15 +395,15 @@ def sidebar():
             '<div style="color:#00d4aa;font-size:15px;font-weight:600;letter-spacing:.08em">'
             '⚡ CROWDING MONITOR</div>'
             '<div style="color:#4a5a7a;font-size:11px;margin-bottom:12px">'
-            '五层框架 · 赔率视角 v2.1</div>',
+            '六层框架 · 出清状态 · 赔率视角 v3.0</div>',
             unsafe_allow_html=True
         )
         st.markdown("---")
         st.markdown('<div style="color:#6677aa;font-size:11px;margin-bottom:6px">维度权重（合计需=100%）</div>',
                     unsafe_allow_html=True)
         dw = {}
-        for dim, default in [("预期拥挤",20),("持仓拥挤",20),("交易拥挤",25),
-                              ("估值拥挤",20),("行为拥挤",15)]:
+        for dim, default in [("叙事拥挤",20),("持仓拥挤",18),("交易拥挤",22),
+                              ("估值拥挤",20),("广度与领导权",20)]:
             dw[dim] = st.slider(dim, 0, 40, default, 5) / 100
         total_w = sum(dw.values())
         if abs(total_w - 1.0) > 0.01:
@@ -506,8 +508,11 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
             _, c = get_level(s)
             primary = max(DIMS, key=lambda d: float(row.get(d, 0)))
             cmt = commentary(row)
-            level_lbl = row["拥挤等级"]
-            level_desc_short = LEVEL_DESC.get(level_lbl, "")
+            level_lbl  = row["拥挤等级"]
+            state_icon = row.get("状态图标", "")
+            state_name = row.get("状态", "")
+            state_color= row.get("状态色", c)
+            state_expl = row.get("状态说明", "")
             st.markdown(f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -517,8 +522,12 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
   <div style="color:#6677aa;font-size:11px;margin-top:4px">
     主导维度: <span style="color:#8899bb">{primary}</span> · {badge(level_lbl)}
   </div>
-  <div style="color:#7a8a9a;font-size:11px;margin-top:5px;line-height:1.6">{level_desc_short}</div>
-  <div style="color:#8a6a4a;font-size:11px;margin-top:6px">{cmt['action']}</div>
+  <div style="margin-top:5px;padding:4px 8px;border-radius:3px;
+       background:{row.get('状态背景','#111827')};display:inline-block">
+    <span style="color:{state_color};font-size:11px;font-weight:600">{state_icon} {state_name}</span>
+    <span style="color:#4a5a6a;font-size:10px;margin-left:8px">{row.get('操作偏向','')}</span>
+  </div>
+  <div style="color:#7a8a9a;font-size:10px;margin-top:4px;line-height:1.5">{state_expl}</div>
 </div>""", unsafe_allow_html=True)
 
     with col_cold:
@@ -527,8 +536,8 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
         for tk, row in bot3.iterrows():
             s = float(row["总拥挤度"])
             _, c = get_level(s)
-            narrative_s = float(row.get("预期拥挤", 50))
-            heating = "⚡ 预期维度开始升温，值得跟踪" if narrative_s > 50 else "各维度均处于历史低分位"
+            narrative_s = float(row.get("叙事拥挤", 50))
+            heating = "⚡ 叙事维度开始升温，值得跟踪" if narrative_s > 50 else "各维度均处于历史低分位"
             st.markdown(f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -690,12 +699,39 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
     p_df  = detail["positioning"]
     v_df  = detail["valuation"]
     n_df  = detail["narrative"]
-    b_df  = detail["behavioral"]
+    br_df = detail["breadth"]
+    cl_df = detail["clearance"]
     pcr_d = detail.get("pcr", {})
-    scorecard = build_scorecard(sel, t_df, p_df, v_df, n_df, b_df)
+    scorecard = build_scorecard(sel, t_df, p_df, v_df, n_df, br_df, cl_df)
+
+    # ── 状态机卡片
+    state_name  = row.get("状态", "—")
+    state_icon  = row.get("状态图标", "")
+    state_color = row.get("状态色", "#8899bb")
+    state_bg    = row.get("状态背景", "#111827")
+    state_act   = row.get("操作偏向", "")
+    state_expl  = row.get("状态说明", "")
+    cl_score    = float(row.get("出清状态", 50))
+    br_score    = float(row.get("广度与领导权", 50))
+    st.markdown(
+        f'<div style="background:{state_bg};border:1px solid {state_color}40;'
+        f'border-left:3px solid {state_color};border-radius:5px;'
+        f'padding:10px 16px;margin-bottom:10px">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center">'
+        f'<span style="color:{state_color};font-size:14px;font-weight:700">'
+        f'{state_icon} {state_name}</span>'
+        f'<span style="color:#6a7a8a;font-size:11px">{state_act}</span>'
+        f'</div>'
+        f'<div style="color:#8a9aaa;font-size:11px;margin-top:5px;line-height:1.6">'
+        f'{state_expl}</div>'
+        f'<div style="color:#4a5a6a;font-size:10px;margin-top:4px">'
+        f'广度恶化 {br_score:.0f}分 · 出清信号 {cl_score:.0f}分</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     # ── 数据完整度面板（全宽，在雷达图后）
-    comp = compute_completeness(sel, t_df, p_df, v_df, n_df, b_df, pcr_d)
+    comp = compute_completeness(sel, t_df, p_df, v_df, n_df, br_df, cl_df, pcr_d)
     st.markdown(completeness_banner(comp), unsafe_allow_html=True)
 
     dims_sorted = sorted(DIMS, key=lambda d: -float(row.get(d, 50)))
@@ -730,19 +766,27 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
                     unsafe_allow_html=True
                 )
 
-            # 预期拥挤：媒体热度缺失时显示重归一化提示
-            if dim == "预期拥挤" and sel in n_df.index:
+            # 叙事拥挤：媒体热度或PCR缺失时显示重归一化提示
+            if dim == "叙事拥挤" and sel in n_df.index:
                 nr = n_df.loc[sel]
-                if bool(nr.get("news_missing", True)):
-                    aw = float(nr.get("accel_eff_w", 0.571)) * 100
-                    sw = float(nr.get("skew_eff_w", 0.429)) * 100
+                if bool(nr.get("_renorm", False)):
+                    aw = float(nr.get("accel_eff_w", 0.545)) * 100
+                    sw = float(nr.get("skew_eff_w", 0.455)) * 100
+                    nw = float(nr.get("news_eff_w", 0.0)) * 100
+                    pw = float(nr.get("pcr_eff_w", 0.0)) * 100
+                    missing_parts = []
+                    if bool(nr.get("news_missing", True)): missing_parts.append("媒体热度")
+                    if bool(nr.get("pcr_missing",  True)): missing_parts.append("PCR")
                     st.markdown(
                         f'<div style="color:#ddaa44;font-size:11px;margin-bottom:6px;'
                         f'padding:5px 10px;background:#181208;border-radius:3px;'
                         f'border-left:2px solid #8a7020">'
-                        f'⚠️ 媒体热度数据获取失败（不代表媒体关注度为零）— '
+                        f'⚠️ {" / ".join(missing_parts)}数据缺失 — '
                         f'本维度已按有效指标重新归一化权重：'
-                        f'动量加速度 {aw:.1f}% · 收益偏度 {sw:.1f}%</div>',
+                        f'动量加速度 {aw:.1f}% · 收益偏度 {sw:.1f}%'
+                        + (f' · 媒体热度 {nw:.1f}%' if nw > 0 else '')
+                        + (f' · PCR {pw:.1f}%' if pw > 0 else '')
+                        + '</div>',
                         unsafe_allow_html=True
                     )
 
@@ -969,16 +1013,16 @@ def tab_signals(scores: pd.DataFrame):
             st.markdown('<div class="note" style="padding:8px">暂无</div>', unsafe_allow_html=True)
 
     with col2:
-        st.markdown('<div style="color:#b7950b;font-size:13px;font-weight:600;margin-bottom:6px">⚡ 预期先行（叙事 > 价格）</div>',
+        st.markdown('<div style="color:#b7950b;font-size:13px;font-weight:600;margin-bottom:6px">⚡ 叙事先行（叙事 > 价格）</div>',
                     unsafe_allow_html=True)
         found3 = False
         for tk, row in scores.iterrows():
-            if (float(row.get("预期拥挤",50)) >= 55 and
+            if (float(row.get("叙事拥挤",50)) >= 55 and
                 float(row.get("交易拥挤",50)) < 50 and
                 float(row["总拥挤度"]) < 62):
                 found3 = True
                 signal_card(tk, row,
-                    f"预期 {row.get('预期拥挤','—'):.0f} > 交易 {row.get('交易拥挤','—'):.0f} | "
+                    f"叙事 {row.get('叙事拥挤','—'):.0f} > 交易 {row.get('交易拥挤','—'):.0f} | "
                     f"叙事已集中但价格未跟进，属于潜在拥挤积聚早期",
                     border_color="#7b6a10")
         if not found3:
@@ -997,8 +1041,9 @@ def tab_signals(scores: pd.DataFrame):
 
     st.markdown("---")
     st.markdown(
-        '<div class="note">预期拥挤维度「媒体热度代理」因子基于 yfinance 新闻条目计数的横截面排名（非历史分位），'
-        '衡量相对媒体关注度。持仓拥挤各指标为ETF成交量/Beta代理，非直接基金持仓数据。</div>',
+        '<div class="note">叙事拥挤维度「媒体热度代理」因子基于 yfinance 新闻条目计数的横截面排名（非历史分位），'
+        '衡量相对媒体关注度。持仓拥挤各指标为ETF成交量/Beta代理，非直接基金持仓数据。'
+        '广度与领导权为ETF级代理，非板块内个股广度数据。</div>',
         unsafe_allow_html=True
     )
 
@@ -1027,37 +1072,39 @@ def tab_method():
 </div>
 """, unsafe_allow_html=True)
 
-    # ── 五层框架
+    # ── 六层框架
     st.markdown("""
 <div class="method-section">
-  <div class="method-h">五层拥挤框架</div>
+  <div class="method-h">六层框架：五维拥挤分 + 出清状态</div>
   <div class="method-body">
-    我们把「拥挤」分解为五个独立维度，每个维度反映不同类型的信号：
+    我们把「拥挤」分解为<b>五个独立维度</b>（计入总拥挤度），并引入<b>出清状态</b>（仅进状态机，不影响总分）：
   </div>
 </div>
 """, unsafe_allow_html=True)
 
     dim_details = [
-        ("交易拥挤", "25%", "#c0392b",
-         "衡量近期价格动量、成交量和波动率是否出现短期过热。"
-         "包含：RSI历史分位、1M动量分位、成交量Surge、波动率扩张、52W价格位置。",
-         "交易热 ≠ 全面拥挤。如果持仓未极端、估值未透支，交易维度高分只代表短期超热。"),
-        ("持仓拥挤", "20%", "#d35400",
+        ("叙事拥挤", "20%", "#2471a3",
+         "衡量市场叙事/共识是否已高度集中，「人尽皆知」的程度。"
+         "包含：动量加速度（1M vs 3M月均）、收益率偏度（近60日）、媒体热度代理（yfinance新闻计数）、PCR情绪（Put/Call Ratio）。",
+         "媒体热度为代理变量，PCR基于近2个到期日期权链，部分行业流动性不足时可能缺失。"),
+        ("持仓拥挤", "18%", "#d35400",
          "衡量资金是否持续、集中流入该行业，形成一致性持仓。"
          "包含：成交量中期趋势（63D/252D）、Beta扩张（30D/90D）、相对SPY资金流分位。",
          "使用成交量趋势和Beta作为持仓集中度的间接代理，无法直接获取基金实际持仓（如13F）。"),
+        ("交易拥挤", "22%", "#c0392b",
+         "衡量近期价格动量、成交量和波动率是否出现短期过热。"
+         "包含：RSI历史分位、1M动量分位、成交量Surge、波动率扩张、价格/50MA、价格/200MA、上涨日比例。",
+         "交易热 ≠ 全面拥挤。如果持仓未极端、估值未透支，交易维度高分只代表短期超热。"),
         ("估值拥挤", "20%", "#b7950b",
          "衡量市场定价是否已透支远期预期，相对历史偏贵。"
-         "包含：52W Z-Score（价格偏离年度均值）、价格/200日均线历史分位、3M相对SPY超额收益分位。",
-         "此处估值代理基于价格行为，不是真正的PE/PB等基本面估值倍数，局限性明显。"),
-        ("预期拥挤", "20%", "#2471a3",
-         "衡量市场叙事/共识是否已高度集中，「人尽皆知」的程度。"
-         "包含：动量加速度（1M vs 3M月均）、收益率偏度（近60日）、媒体热度代理（yfinance新闻计数横截面排名）。",
-         "媒体热度为代理变量，基于各行业ETF的yfinance新闻条目数量做横截面排名，衡量相对关注度，非绝对热度。"),
-        ("行为拥挤", "15%", "#1e8449",
-         "衡量市场是否正在失去风险感：坏消息被忽视，期权市场过度乐观。"
-         "包含：近30日上涨日比例、正/负收益不对称、Put/Call Ratio。",
-         "在震荡市场中可能发出噪音信号，需结合其他维度综合判断。"),
+         "包含：52W Z-Score（价格偏离年度均值）、3M相对SPY超额收益分位、PE/PB横截面代理。",
+         "PE/PB 来自 yfinance 点值，做11行业横截面分位排名，非历史时间序列分位，精度有限。"),
+        ("广度与领导权", "20%", "#6a3a9a",
+         "衡量拥挤结构是否正在内部松动：ETF距近期高点回撤、趋势均线一致性、短长期动量背离。高分=广度恶化。",
+         "无法直接获取板块内个股数据，使用ETF级别的价格结构作为广度代理，精确度有限。"),
+        ("出清状态", "仅进状态机", "#4a6a4a",
+         "衡量市场是否正在主动出清拥挤：距252日高点回撤深度、波动率突刺（10日/90日）、正负收益不对称（坏消息主导）。",
+         "出清状态不影响总拥挤度，仅用于状态机分类（踩踏风险区/拥挤松动中/接近出清等7种状态）。"),
     ]
 
     for dim, weight, color, desc, limit in dim_details:
@@ -1084,9 +1131,9 @@ def tab_method():
     例如：RSI 当前值为 72，在过去252个交易日中处于第 88 百分位 → RSI 得分 = 88。<br><br>
     <b>第二步：维度加权</b><br>
     每个子指标在其维度内有权重，加权汇总得到维度得分（0-100）。<br><br>
-    <b>第三步：五维加权</b><br>
-    五个维度按设定权重（预期20% / 持仓20% / 交易25% / 估值20% / 行为15%）加权汇总，
-    得到总拥挤度（0-100）。权重可在侧边栏自定义。
+    <b>第三步：五维加权（六层版本）</b><br>
+    五个计入总分的维度按设定权重（叙事20% / 持仓18% / 交易22% / 估值20% / 广度20%）加权汇总，
+    得到总拥挤度（0-100）。出清状态不进总分，仅用于状态机。权重可在侧边栏自定义。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1139,7 +1186,7 @@ def tab_method():
         ("ds-live",        "✅ 真实数据",  "RSI / 动量 / 波动率",  "基于价格数据实时计算"),
         ("ds-live",        "✅ 真实数据",  "期权 P/C Ratio",       "从期权链实时计算，部分行业流动性不足时可能缺失"),
         ("ds-proxy",       "⚠️ 代理指标", "Beta 扩张",            "用近期/中期 Beta 比值代理资金集中度，非直接持仓数据"),
-        ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "基于价格行为（Z-Score、MA200偏离），不是PE/PB等基本面估值"),
+        ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "Z-Score/超额收益为价格行为代理；PE/PB取自yfinance，做11行业横截面排名"),
         ("ds-proxy",       "⚠️ 代理指标", "媒体热度代理",         "yfinance新闻条目数量横截面排名（11个行业互比），衡量相对媒体关注度"),
         ("ds-placeholder", "🔲 暂未接入", "基金持仓（13F）",      "待接入，接入后持仓拥挤维度将显著改善"),
     ]
@@ -1161,6 +1208,113 @@ def tab_method():
     )
 
 
+# ─── Tab 5: 状态机说明 ───────────────────────────────────────────────────────
+def tab_state_machine(scores: pd.DataFrame):
+    from config import STATE_CONFIG
+    st.markdown(
+        '<h3 style="color:#00d4aa;font-weight:400;margin-bottom:4px">出清状态机</h3>'
+        '<div style="color:#4a5a7a;font-size:12px;margin-bottom:16px">'
+        '根据总拥挤度、广度恶化程度、出清信号强弱，自动归类7种市场状态</div>',
+        unsafe_allow_html=True
+    )
+
+    # 状态分布（当前所有行业）
+    st.markdown(
+        '<div style="color:#8899bb;font-size:12px;font-weight:600;margin-bottom:8px">'
+        '▶ 当前各行业状态分布</div>',
+        unsafe_allow_html=True
+    )
+    state_groups: dict = {}
+    for tk, row in scores.iterrows():
+        sname = row.get("状态", "低拥挤/早期升温")
+        state_groups.setdefault(sname, []).append((tk, row))
+
+    ncols = min(3, max(1, len(state_groups)))
+    cols  = st.columns(ncols)
+    col_i = 0
+    for sn, entries in sorted(state_groups.items(),
+                               key=lambda x: -float(scores.loc[x[1][0][0], "总拥挤度"])):
+        cfg  = STATE_CONFIG.get(sn, {})
+        sc   = cfg.get("color", "#8899bb")
+        sb   = cfg.get("bg", "#111827")
+        icon = cfg.get("icon", "")
+        act  = cfg.get("action", "")
+        with cols[col_i % ncols]:
+            entries_html = "".join(
+                f'<div style="color:#c8d8e8;font-size:12px;padding:3px 0;'
+                f'border-bottom:1px solid #0d1520">'
+                f'{SECTOR_ETFS[tk2]["name"]} ({tk2}) '
+                f'<span style="color:{sc};font-weight:600">'
+                f'{float(r2["总拥挤度"]):.0f}</span></div>'
+                for tk2, r2 in entries
+            )
+            st.markdown(
+                f'<div style="background:{sb};border:1px solid {sc}40;'
+                f'border-top:3px solid {sc};border-radius:5px;padding:10px 14px;margin-bottom:10px">'
+                f'<div style="color:{sc};font-weight:700;font-size:13px;margin-bottom:6px">'
+                f'{icon} {sn}</div>'
+                f'<div style="color:#4a5a6a;font-size:10px;margin-bottom:6px">{act}</div>'
+                f'{entries_html}</div>',
+                unsafe_allow_html=True
+            )
+        col_i += 1
+
+    # 状态机规则说明
+    st.markdown("---")
+    st.markdown(
+        '<div style="color:#8899bb;font-size:12px;font-weight:600;margin-bottom:8px">'
+        '▶ 状态机分类规则（优先级从高到低，首先匹配）</div>',
+        unsafe_allow_html=True
+    )
+    rules = [
+        ("踩踏风险区",     "总拥挤 ≥72 且 出清信号 ≤35",
+         "极度拥挤且无出清迹象，是踩踏风险最高的状态"),
+        ("拥挤松动中",     "总拥挤 ≥58 且 出清信号 ≥60",
+         "拥挤偏高但出清信号已出现，市场正在主动释放压力"),
+        ("高拥挤/赔率下降","总拥挤 ≥62",
+         "高拥挤但出清信号尚弱，赔率显著收窄"),
+        ("接近出清",       "总拥挤 ≥48 且 出清信号 ≥65",
+         "中等拥挤叠加强出清信号，建议等待出清完成"),
+        ("拥挤扩张中",     "总拥挤 ≥48 且 广度恶化 ≥55",
+         "拥挤偏高且广度在恶化，拥挤格局仍在扩张"),
+        ("反向观察区",     "总拥挤 <40 且 出清信号 ≥55",
+         "低拥挤叠加出清信号，可能是反转积累阶段"),
+        ("低拥挤/早期升温","默认（不符合以上任何条件）",
+         "整体低拥挤，各维度无极端信号，早期升温或低关注阶段"),
+    ]
+    for i, (state_name, condition, desc) in enumerate(rules, 1):
+        cfg = STATE_CONFIG.get(state_name, {})
+        sc  = cfg.get("color", "#8899bb")
+        sb  = cfg.get("bg", "#111827")
+        icon= cfg.get("icon", "")
+        act = cfg.get("action", "")
+        st.markdown(
+            f'<div style="display:flex;gap:12px;align-items:flex-start;'
+            f'background:{sb};border:1px solid {sc}30;'
+            f'border-left:3px solid {sc};border-radius:4px;'
+            f'padding:8px 14px;margin-bottom:6px">'
+            f'<div style="min-width:22px;color:#4a5a6a;font-size:10px;'
+            f'font-weight:700;margin-top:2px">#{i}</div>'
+            f'<div style="flex:1">'
+            f'<div style="color:{sc};font-weight:600;font-size:12px">{icon} {state_name}</div>'
+            f'<div style="color:#8899aa;font-size:11px;margin-top:2px">'
+            f'条件：<code style="color:#aabb88;background:#0a1020;padding:1px 5px;'
+            f'border-radius:2px">{condition}</code></div>'
+            f'<div style="color:#6a7a8a;font-size:11px;margin-top:3px">{desc}</div>'
+            f'<div style="color:#4a5a6a;font-size:10px;margin-top:3px">{act}</div>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown(
+        '<div class="note" style="margin-top:12px">'
+        '状态机使用三个输入：总拥挤度（叙事+持仓+交易+估值+广度五维加权）、'
+        '广度与领导权得分（ETF级代理）、出清状态得分（距高点回撤+波动率突刺+收益不对称）。'
+        '出清状态得分不影响总拥挤度，仅用于状态分类。</div>',
+        unsafe_allow_html=True
+    )
+
+
 # ─── 主入口 ───────────────────────────────────────────────────────────────────
 def main():
     weights = sidebar()
@@ -1168,7 +1322,7 @@ def main():
     if tw > 0:
         weights = {k: v/tw for k, v in weights.items()}
 
-    with st.spinner("正在计算五层拥挤度…"):
+    with st.spinner("正在计算六层拥挤度…"):
         try:
             scores, detail = load_scores(tuple(sorted(weights.items())))
         except Exception as e:
@@ -1179,19 +1333,21 @@ def main():
         '<h2 style="font-weight:300;letter-spacing:.04em">'
         '美股行业拥挤度分析 '
         '<span style="color:#00d4aa;font-size:13px;font-weight:400">'
-        '· 玻璃箱评分 · 五层框架 · 赔率视角</span></h2>',
+        '· 玻璃箱评分 · 六层框架 · 出清状态机 · 赔率视角</span></h2>',
         unsafe_allow_html=True
     )
 
-    t1, t2, t3, t4, t5 = st.tabs([
+    t1, t2, t3, t4, t5, t6 = st.tabs([
         "  市场总览  ", "  行业排名  ",
-        "  行业详情  ", "  信号监控  ", "  方法说明  "
+        "  行业详情  ", "  信号监控  ",
+        "  状态机说明  ", "  方法说明  "
     ])
     with t1: tab_overview(scores, detail["prices"])
     with t2: tab_ranking(scores)
     with t3: tab_detail(scores, detail, weights)
     with t4: tab_signals(scores)
-    with t5: tab_method()
+    with t5: tab_state_machine(scores)
+    with t6: tab_method()
 
 
 if __name__ == "__main__":
