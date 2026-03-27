@@ -786,16 +786,30 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
                     )
                 else:
                     tier_html = TIER_BADGE.get(tier, "")
+                _pct_ctx   = rec.get("pct_context", "")
+                _low_badge = rec.get("low_score_note", "")
+                _low_html  = (
+                    f'&nbsp;<span style="background:#0d2010;color:#55cc77;font-size:9px;'
+                    f'padding:1px 4px;border-radius:3px;border:1px solid #2a7040">'
+                    f'{_low_badge}</span>'
+                ) if _low_badge else ""
+                _score_cell = (
+                    f"<td style='color:{ic};font-weight:600;text-align:center;width:65px;"
+                    f"font-size:10px;line-height:1.3'>{_pct_ctx}</td>"
+                ) if _pct_ctx else (
+                    f"<td style='color:{ic};font-weight:600;text-align:center;width:45px'>"
+                    f"{ind_score:.0f}</td>"
+                )
                 rows_html += (
                     f"<tr>"
-                    f"<td style='color:#8899bb;width:130px'>{name_tt}&nbsp;{tier_html}</td>"
+                    f"<td style='color:#8899bb;width:130px'>{name_tt}&nbsp;{tier_html}{_low_html}</td>"
                     f"<td style='color:#5a6a7a;font-size:10px;width:60px'>{ind_raw}</td>"
                     f"<td style='width:100px'>"
                     f"  <div class='sub-bar-bg'>"
                     f"    <div class='sub-bar-fg' style='width:{bar_w}%;background:{ic}'></div>"
                     f"  </div>"
                     f"</td>"
-                    f"<td style='color:{ic};font-weight:600;text-align:center;width:45px'>{ind_score:.0f}</td>"
+                    + _score_cell +
                     f"<td style='color:#4a5a7a;text-align:center;width:40px'>{ind_w_str}</td>"
                     f"<td style='color:#aabb88;text-align:right;width:45px'>{ind_contrib:.1f}</td>"
                     f"<td style='color:#4a5a6a;font-size:10px;padding-left:10px'>{rec['说明']}</td>"

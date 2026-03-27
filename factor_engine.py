@@ -488,24 +488,56 @@ def build_scorecard(ticker: str,
     # ── 估值拥挤子指标
     if ticker in v_df.index:
         r = v_df.loc[ticker]
-        items = [
+        for name, raw, score, w, desc in [
             ("52W Z-Score",    f"{safe_float(r.get('zscore_52w_raw', 0), 0):.2f}σ",
              r.get("zscore_52w_score", 50),  VALUATION_W["zscore_52w"],
              "价格偏离52周均值的标准差倍数（Z=-3→0分，Z=+3→100分）"),
-            ("价格/200日均线",
-             f"{safe_float(r.get('pta_raw', float('nan')), float('nan')):.3f}x" if not __import__('math').isnan(safe_float(r.get('pta_raw', float('nan')), float('nan'))) else "—",
-             r.get("pta_score", 50),         VALUATION_W["price_to_ma200"],
-             f"价格相对200日均线的比值\uff0c在过去{int(r.get('pta_n', 0))}日历史分布中的分位"),
             ("相对SPY超额",    "—",
              r.get("exc_score", 50),         VALUATION_W["excess_vs_spy"],
              "3M超额收益历史分位——相对估值溢价代理"),
-        ]
-        for name, raw, score, w, desc in items:
+        ]:
             sf = safe_float(score, 50)
             records.append({"维度": "估值拥挤", "子指标": name, "原始值": raw,
                              "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
                              "子项贡献": round(sf * w, 1), "说明": desc,
                              "status": "ok"})
+        # 价格/200日均线 —— 独立处理，区分数据缺失和真实低分
+        import math as _mth
+        _pta_rv  = r.get("pta_raw", float("nan"))
+        _pta_n   = int(r.get("pta_n", 0))
+        _pta_sf  = safe_float(r.get("pta_score", 50), 50)
+        _pta_w   = VALUATION_W["price_to_ma200"]
+        _pta_ok  = _pta_n > 0 and not _mth.isnan(safe_float(_pta_rv, float("nan")))
+        if not _pta_ok:
+            records.append({
+                "维度": "估值拥挤", "子指标": "价格/200日均线",
+                "原始值": "—",
+                "历史分位": float("nan"),
+                "维度内权重": "0%（缺失）",
+                "子项贡献": 0.0,
+                "说明": "数据不足200日，无法计算200日均线比值",
+                "status": "missing",
+            })
+        else:
+            _pta_rf   = safe_float(_pta_rv, 1.0)
+            _pta_pct  = round(_pta_sf, 1)
+            _pta_rank = round(_pta_sf / 100.0 * _pta_n)
+            _low      = _pta_pct < 5.0
+            _pta_desc = (
+                f"当前价格为200日均线的{_pta_rf:.3f}倍，在过去{_pta_n}个有效样本中处于{_pta_pct:.0f}%分位"
+                + ("，说明价格相对长期趋势没有上行拉伸，因此该指标不给估值拥挤加分。（真实低分，非数据缺失）" if _low else "")
+            )
+            records.append({
+                "维度": "估值拥挤", "子指标": "价格/200日均线",
+                "原始值": f"{_pta_rf:.3f}x",
+                "历史分位": _pta_pct,
+                "维度内权重": f"{_pta_w*100:.0f}%",
+                "子项贡献": round(_pta_sf * _pta_w, 1),
+                "说明": _pta_desc,
+                "status": "ok",
+                "pct_context": f"{_pta_pct:.0f}%（{_pta_rank}/{_pta_n}）",
+                "low_score_note": "真实低分" if _low else "",
+            })
 
     # ── 预期拥挤子指标
     if ticker in n_df.index:
