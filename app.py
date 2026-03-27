@@ -991,10 +991,59 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
 
 # ─── Tab 4: 信号监控 ─────────────────────────────────────────────────────────
 def tab_signals(scores: pd.DataFrame):
-    st.markdown(
-        '<div class="note">信号基于当前截面快照。拥挤度时序跟踪（是否快速上升）需历史快照积累，后续版本实现。</div>',
-        unsafe_allow_html=True
-    )
+    sig_col, tog_col = st.columns([3, 1])
+    with sig_col:
+        st.markdown(
+            '<div class="note">信号基于当前截面快照。拥挤度时序跟踪（是否快速上升）需历史快照积累，后续版本实现。</div>',
+            unsafe_allow_html=True
+        )
+    with tog_col:
+        show_all = st.toggle("显示全部行业", value=False, key="sig_show_all")
+
+    if show_all:
+        # ── 全量展示模式：按总拥挤度降序，分四个等级显示
+        for level_label, lo, hi, color in [
+            ("极度拥挤", 80, 101, "#c0392b"),
+            ("高拥挤",   60,  80, "#d35400"),
+            ("中等拥挤", 35,  60, "#b7950b"),
+            ("低拥挤",    0,  35, "#1e8449"),
+        ]:
+            subset = scores[(scores["总拥挤度"] >= lo) & (scores["总拥挤度"] < hi)].sort_values("总拥挤度", ascending=False)
+            if subset.empty:
+                continue
+            st.markdown(
+                f'<div style="color:{color};font-size:13px;font-weight:600;margin:14px 0 6px">'
+                f'{level_label}（{len(subset)} 个）</div>',
+                unsafe_allow_html=True
+            )
+            cols = st.columns(2)
+            for i, (tk, row) in enumerate(subset.iterrows()):
+                s = float(row["总拥挤度"])
+                _, c = get_level(s)
+                top_dim = max(DIMS, key=lambda d: float(row.get(d, 50)))
+                cat = SECTOR_ETFS[tk]["category"]
+                with cols[i % 2]:
+                    st.markdown(f"""
+<div class="card" style="border-left:3px solid {color}">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <span>
+      <span style="color:#c8d8e8;font-weight:600">{SECTOR_ETFS[tk]['name']} ({tk})</span>
+      <span style="color:#3a4a6a;font-size:10px;margin-left:6px">{cat}</span>
+    </span>
+    <span style="color:{c};font-size:20px;font-weight:700">{s:.0f}</span>
+  </div>
+  <div style="color:#6a7a8a;font-size:11px;margin-top:5px">
+    主导维度：{top_dim[:2] if len(top_dim)>2 else top_dim} {float(row.get(top_dim,50)):.0f}分
+  </div>
+</div>""", unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown(
+            '<div class="note">叙事拥挤维度「媒体热度代理」因子基于 yfinance 新闻条目计数的横截面排名（非历史分位），'
+            '衡量相对媒体关注度。持仓拥挤各指标为ETF成交量/Beta代理，非直接基金持仓数据。'
+            '广度与领导权为ETF级代理，非板块内个股广度数据。</div>',
+            unsafe_allow_html=True
+        )
+        return
 
     def signal_card(tk, row, note, border_color="#1e2a3a"):
         s = float(row["总拥挤度"])
