@@ -151,11 +151,15 @@ def compute_score_history(prices: pd.DataFrame,
         else:
             rf_score = pd.Series(50.0, index=p.index)
 
+        # 历史计算无 AUM 数据，仅用3个子指标，动态归一化权重
+        _pos_w = (POSITIONING_W["volume_trend"] +
+                  POSITIONING_W["beta_expansion"] +
+                  POSITIONING_W["relative_flow"])
         positioning = (
             vt_score.fillna(50)    * POSITIONING_W["volume_trend"] +
             beta_score.fillna(50)  * POSITIONING_W["beta_expansion"] +
             rf_score.fillna(50)    * POSITIONING_W["relative_flow"]
-        )
+        ) / _pos_w
 
         # ── 估值拥挤 ──────────────────────────────────────────────────
         # Z-Score (fixed scale)
@@ -315,6 +319,64 @@ def get_trend(history: pd.DataFrame, ticker: str,
         "change_7d":  round(change_7d, 1) if change_7d is not None else None,
         "change_30d": round(change_30d, 1) if change_30d is not None else None,
     }
+
+
+def get_acceleration(history: pd.DataFrame, ticker: str,
+                     dim: str = "总拥挤度") -> dict:
+    """
+    拥挤度加速度：最近一周变化 vs 前一周变化的差值。
+    正值 = 拥挤积累在加速；负值 = 拥挤释放在加速。
+    """
+    if (ticker, dim) not in history.columns:
+        return {"accel": None, "direction": "—", "description": "数据不足"}
+
+    s = history[(ticker, dim)].dropna()
+    if len(s) < 11:
+        return {"accel": None, "direction": "—", "description": "数据不足"}
+
+    current = float(s.iloc[-1])
+    change_recent = current - float(s.iloc[-6])          # 最近5个交易日变化
+    change_prev = float(s.iloc[-6]) - float(s.iloc[-11]) # 前5个交易日变化
+    accel = round(change_recent - change_prev, 1)
+
+    if abs(accel) < 1.5:
+        direction = "→ 稳定"
+        desc = "变化速度平稳"
+    elif accel > 0 and change_recent > 0:
+        direction = "⏫ 加速上升"
+        desc = "拥挤正在加速积累，边际恶化"
+    elif accel > 0 and change_recent <= 0:
+        direction = "⏸ 减速释放"
+        desc = "拥挤释放速度放缓"
+    elif accel < 0 and change_recent < 0:
+        direction = "⏬ 加速释放"
+        desc = "拥挤正在加速出清"
+    else:
+        direction = "⏸ 减速上升"
+        desc = "拥挤上升势头放缓"
+
+    return {
+        "accel": accel,
+        "recent_change": round(change_recent, 1),
+        "prev_change": round(change_prev, 1),
+        "direction": direction,
+        "description": desc,
+    }
+
+
+def accel_badge(accel_data: dict) -> str:
+    """加速度 → 彩色 HTML badge"""
+    a = accel_data.get("accel")
+    d = accel_data.get("direction", "—")
+    if a is None:
+        return '<span style="color:#4a5a7a">—</span>'
+    if abs(a) < 1.5:
+        color = "#4a5a7a"
+    elif a > 0:
+        color = "#c0392b"
+    else:
+        color = "#1e8449"
+    return f'<span style="color:{color};font-size:10px">{d}</span>'
 
 
 def get_trend_series(history: pd.DataFrame, ticker: str,

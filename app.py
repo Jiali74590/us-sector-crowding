@@ -22,7 +22,8 @@ from factor_engine import (
     build_scorecard, compute_completeness,
 )
 from scoring import aggregate, commentary, get_level
-from history import compute_score_history, get_trend, get_trend_series, trend_arrow
+from history import (compute_score_history, get_trend, get_trend_series,
+                     trend_arrow, get_acceleration, accel_badge)
 
 # ─── 页面配置 ─────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -576,7 +577,7 @@ def load_scores(w_tuple: tuple) -> tuple:
     news_d   = fetch_news_count()
 
     t_df  = compute_trading(prices, volumes)
-    p_df  = compute_positioning(prices, volumes)
+    p_df  = compute_positioning(prices, volumes, info_d)
     v_df  = compute_valuation(prices, info_d)
     n_df  = compute_narrative(prices, news_d, pcr_d)
     br_df = compute_breadth(prices)
@@ -643,7 +644,7 @@ def sidebar():
 <span style="color:#22c55e">&#9679;</span> <span style="color:#64748b">价格/成交量 · RSI · 动量 · 波动率</span><br>
 <span style="color:#22c55e">&#9679;</span> <span style="color:#64748b">期权 P/C Ratio</span><br>
 <span style="color:#eab308">&#9679;</span> <span style="color:#536580">Beta扩张 · 媒体热度 (代理)</span><br>
-<span style="color:#334155">&#9675;</span> <span style="color:#334155">基金持仓 (暂未接入)</span>
+<span style="color:#eab308">&#9679;</span> <span style="color:#536580">AUM资金沉淀 (yfinance 代理)</span>
 </div>""", unsafe_allow_html=True)
     return dw
 
@@ -696,10 +697,22 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame, history: pd.DataFra
                 if len(mkt_avg_hist) >= 6:
                     mkt_7d = float(mkt_avg_hist.iloc[-1] - mkt_avg_hist.iloc[-6])
                     mkt_30d = float(mkt_avg_hist.iloc[-1] - mkt_avg_hist.iloc[0]) if len(mkt_avg_hist) >= 23 else None
+                    # 市场平均加速度
+                    mkt_accel = None
+                    if len(mkt_avg_hist) >= 11:
+                        _rc = float(mkt_avg_hist.iloc[-1] - mkt_avg_hist.iloc[-6])
+                        _rp = float(mkt_avg_hist.iloc[-6] - mkt_avg_hist.iloc[-11])
+                        mkt_accel = round(_rc - _rp, 1)
+                    accel_span = ""
+                    if mkt_accel is not None:
+                        _ac = "#c0392b" if mkt_accel > 1.5 else "#1e8449" if mkt_accel < -1.5 else "#4a5a7a"
+                        _al = "加速↑" if mkt_accel > 1.5 else "加速↓" if mkt_accel < -1.5 else "稳定"
+                        accel_span = f'&nbsp;&nbsp;<span style="color:#6a7a9a">边际:</span> <span style="color:{_ac};font-size:10px">{_al} {mkt_accel:+.1f}</span>'
                     trend_html = (
                         f'<div style="text-align:center;margin-top:4px;font-size:11px">'
                         f'<span style="color:#6a7a9a">7D:</span> {trend_arrow(mkt_7d)}'
                         f'&nbsp;&nbsp;<span style="color:#6a7a9a">30D:</span> {trend_arrow(mkt_30d)}'
+                        f'{accel_span}'
                         f'</div>'
                     )
                 else:
@@ -768,6 +781,8 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame, history: pd.DataFra
             t_data = get_trend(history, tk) if history is not None else {}
             t7 = trend_arrow(t_data.get("change_7d"))
             t30 = trend_arrow(t_data.get("change_30d"))
+            a_data = get_acceleration(history, tk) if history is not None else {}
+            a_badge = accel_badge(a_data) if history is not None else ""
             st.markdown(f"""
 <div class="card" style="border-left:3px solid {c}">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -780,6 +795,7 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame, history: pd.DataFra
     主导维度: <span style="color:#94a3b8">{primary}</span>&nbsp;&nbsp;{badge(level_lbl)}
     &nbsp;·&nbsp; <span style="color:#475569">7D</span>{t7}
     &nbsp;<span style="color:#475569">30D</span>{t30}
+    &nbsp;·&nbsp; {a_badge}
   </div>
   <div style="margin-top:6px;padding:5px 10px;border-radius:6px;
        background:{row.get('状态背景','#0f1629')};display:inline-block">
@@ -957,10 +973,13 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict,
     t_data = get_trend(history, sel) if history is not None else {}
     t7_html = trend_arrow(t_data.get("change_7d"))
     t30_html = trend_arrow(t_data.get("change_30d"))
+    a_data = get_acceleration(history, sel) if history is not None else {}
+    a_html = accel_badge(a_data) if history is not None else ""
     trend_span = (
         f'&nbsp;&nbsp;<span style="font-size:11px">'
         f'<span style="color:#475569">7D</span>{t7_html}'
         f'&nbsp;<span style="color:#475569">30D</span>{t30_html}'
+        f'&nbsp;&nbsp;{a_html}'
         f'</span>'
     ) if history is not None else ""
     st.markdown(
@@ -1287,6 +1306,60 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict,
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    # ── 相对强弱 + 拥挤度叠加图
+    prices_data = detail["prices"]
+    if sel in prices_data.columns and "SPY" in prices_data.columns:
+        p_sel = prices_data[sel].dropna()
+        p_spy = prices_data["SPY"].dropna()
+        if len(p_sel) > 63 and len(p_spy) > 63:
+            # Rolling 63-day excess return (sector - SPY)
+            r_sel = p_sel.pct_change(63) * 100
+            r_spy = p_spy.reindex(r_sel.index).pct_change(63) * 100
+            excess = (r_sel - r_spy).dropna().iloc[-252:]
+
+            if len(excess) > 10:
+                st.markdown("---")
+                st.markdown("**相对强弱 vs 拥挤度（Rolling 63D 超额收益 + 拥挤度叠加）**")
+
+                from plotly.subplots import make_subplots
+                fig_rs = make_subplots(specs=[[{"secondary_y": True}]])
+
+                # 超额收益线（左Y轴）
+                fig_rs.add_trace(go.Scatter(
+                    x=excess.index, y=excess.values,
+                    name="63D超额收益(%)", line=dict(color="#6366f1", width=2),
+                    fill="tozeroy", fillcolor="rgba(99,102,241,0.06)",
+                ), secondary_y=False)
+                fig_rs.add_hline(y=0, line_dash="dash", line_color="#1e2d52", opacity=0.5)
+
+                # 拥挤度线（右Y轴）
+                if history is not None:
+                    crowd_s = get_trend_series(history, sel, "总拥挤度")
+                    if len(crowd_s) > 5:
+                        fig_rs.add_trace(go.Scatter(
+                            x=crowd_s.index, y=crowd_s.values,
+                            name="总拥挤度", line=dict(color="#00d4aa", width=2, dash="dot"),
+                        ), secondary_y=True)
+
+                fig_rs.update_layout(
+                    height=280, hovermode="x unified",
+                    legend=dict(orientation="h", y=-0.2,
+                                font=dict(family="Outfit, sans-serif", size=11)),
+                    margin=dict(l=50, r=50, t=20, b=60), **PT,
+                )
+                fig_rs.update_yaxes(title_text="超额收益(%)", secondary_y=False,
+                                    titlefont=dict(size=10, color="#6366f1"))
+                fig_rs.update_yaxes(title_text="拥挤度", range=[0, 100],
+                                    secondary_y=True,
+                                    titlefont=dict(size=10, color="#00d4aa"))
+                st.plotly_chart(fig_rs, use_container_width=True)
+                st.markdown(
+                    '<div class="note">紫线=相对SPY的63天滚动超额收益，'
+                    '绿线=拥挤度走势。当超额收益高位+拥挤度上升→赔率下降；'
+                    '超额收益回落+拥挤度下降→可能接近出清。</div>',
+                    unsafe_allow_html=True
+                )
+
     # ── 拥挤度走势（60个交易日）
     if history is not None and (sel, "总拥挤度") in history.columns:
         st.markdown("---")
@@ -1514,8 +1587,8 @@ def tab_method():
          "媒体热度为代理变量，PCR基于近2个到期日期权链，部分行业流动性不足时可能缺失。"),
         ("持仓拥挤", "18%", "#d35400",
          "衡量资金是否持续、集中流入该行业，形成一致性持仓。"
-         "包含：成交量中期趋势（63D/252D）、Beta扩张（30D/90D）、相对SPY资金流分位。",
-         "使用成交量趋势和Beta作为持仓集中度的间接代理，无法直接获取基金实际持仓（如13F）。"),
+         "包含：成交量中期趋势（63D/252D）、Beta扩张（30D/90D）、相对SPY资金流分位、AUM资金沉淀密度（totalAssets/日成交额横截面排名）。",
+         "使用成交量趋势和Beta作为持仓集中度的间接代理。AUM资金沉淀为yfinance快照横截面排名，非历史时间序列。"),
         ("交易拥挤", "22%", "#c0392b",
          "衡量近期价格动量、成交量和波动率是否出现短期过热。"
          "包含：RSI历史分位、1M动量分位、成交量Surge、波动率扩张、价格/50MA、价格/200MA、上涨日比例。",
@@ -1613,7 +1686,7 @@ def tab_method():
         ("ds-proxy",       "⚠️ 代理指标", "Beta 扩张",            "用近期/中期 Beta 比值代理资金集中度，非直接持仓数据"),
         ("ds-proxy",       "⚠️ 代理指标", "估值拥挤各因子",       "Z-Score/超额收益为价格行为代理；PE/PB取自yfinance，做全量ETF横截面排名"),
         ("ds-proxy",       "⚠️ 代理指标", "媒体热度代理",         "yfinance新闻条目数量横截面排名（全量ETF互比），衡量相对媒体关注度"),
-        ("ds-placeholder", "🔲 暂未接入", "基金持仓（13F）",      "待接入，接入后持仓拥挤维度将显著改善"),
+        ("ds-proxy",       "⚠️ 代理指标", "AUM资金沉淀密度",     "totalAssets/日成交额，横截面排名代理ETF资金流"),
     ]
     for css, status, name, note in data_items:
         st.markdown(

@@ -79,11 +79,12 @@ NARRATIVE_W = {
     "pcr_sentiment":  0.20,   # P/C ratio 移入叙事层
 }
 
-# 2. 持仓拥挤（不变）
+# 2. 持仓拥挤（新增 AUM 资金流代理）
 POSITIONING_W = {
-    "volume_trend":   0.35,
-    "beta_expansion": 0.30,
-    "relative_flow":  0.35,
+    "volume_trend":   0.30,
+    "beta_expansion": 0.25,
+    "relative_flow":  0.30,
+    "fund_flow":      0.15,    # AUM/日成交额：资金沉淀密度（横截面排名）
 }
 
 # 3. 交易拥挤（扩展：加入价格/50MA、上涨日比例，移入价格/200MA）
@@ -203,6 +204,14 @@ INDICATOR_QUALITY = {
             "<b>逻辑：</b>相对成交额高 → 该行业正吸引更大比例的市场资金"
         ),
     },
+    "AUM资金沉淀":      {
+        "tier": "proxy", "quality": 0.6,
+        "proxy_note": (
+            "<b>代理目标：</b>ETF 资金沉淀密度 / 隐含 fund flow<br>"
+            "<b>计算方式：</b>totalAssets ÷ (20日均日成交额)，在全量行业ETF横截面中排名<br>"
+            "<b>逻辑：</b>AUM相对日交易额越大 → 资金沉淀越多、流动性越集中 → 持仓拥挤上升"
+        ),
+    },
     "52W Z-Score":      {
         "tier": "proxy", "quality": 0.7,
         "proxy_note": (
@@ -228,6 +237,12 @@ INDICATOR_QUALITY = {
             "在全量ETF横截面中计算分位排名，映射到0-100分<br>"
             "<b>局限：</b>yfinance PE/PB 为ETF层面数据，精度有限；点值横截面非历史分位"
         ),
+    },
+    "AUM资金沉淀":     {
+        "what": "totalAssets / 20日均日成交额，衡量 ETF 中沉淀资金的密度，横截面排名。",
+        "high": "大量资金沉淀在该 ETF 中且日常交易占比低，持仓集中、流动性风险较高。",
+        "low":  "资金沉淀密度低，日常成交额相对 AUM 占比高，持仓不算集中。",
+        "limit": "AUM 为 yfinance 快照数据，非历史时间序列；横截面排名受 ETF 规模差异影响。",
     },
     "动量加速度":       {"tier": "real",    "quality": 1.0},
     "收益偏度":         {"tier": "real",    "quality": 0.8},

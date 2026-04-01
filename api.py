@@ -18,7 +18,7 @@ Sector Crowding API — 供外部 Agent / MCP Server 调用的结构化接口
 import pandas as pd
 from config import SECTOR_ETFS, DIMENSION_WEIGHTS
 from scoring import commentary, get_level
-from history import get_trend
+from history import get_trend, get_acceleration
 
 DIMS = ["叙事拥挤", "持仓拥挤", "交易拥挤", "估值拥挤", "广度与领导权"]
 
@@ -63,9 +63,10 @@ def get_sector_report(ticker: str,
     # 主驱动维度
     top_dim = max(dimensions.items(), key=lambda x: x[1]["score"])
 
-    # 总分趋势
+    # 总分趋势 + 加速度
     total_trend = get_trend(history_df, ticker, "总拥挤度") if history_df is not None else {}
     clearance_trend = get_trend(history_df, ticker, "出清状态") if history_df is not None else {}
+    accel_data = get_acceleration(history_df, ticker) if history_df is not None else {}
 
     return {
         "ticker": ticker,
@@ -80,6 +81,8 @@ def get_sector_report(ticker: str,
         "trend_7d": total_trend.get("change_7d"),
         "trend_30d": total_trend.get("change_30d"),
         "clearance_trend_7d": clearance_trend.get("change_7d"),
+        "acceleration": accel_data.get("accel"),
+        "accel_direction": accel_data.get("direction", "—"),
         "top_driver": top_dim[0],
         "top_driver_score": top_dim[1]["score"],
         "dimensions": dimensions,

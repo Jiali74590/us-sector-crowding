@@ -158,10 +158,11 @@ def compute_trading(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataFrame
 
 # ── 2. 持仓拥挤 ───────────────────────────────────────────────────────────────
 
-def compute_positioning(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataFrame:
+def compute_positioning(prices: pd.DataFrame, volumes: pd.DataFrame,
+                        info: Dict = None) -> pd.DataFrame:
     """
     衡量资金是否持续、集中流入:
-    成交量中期趋势 / Beta扩张 / 相对SPY资金流
+    成交量中期趋势 / Beta扩张 / 相对SPY资金流 / AUM资金沉淀（新）
     """
     spy_p = prices["SPY"].dropna() if "SPY" in prices.columns else None
     spy_v = volumes["SPY"].dropna() if "SPY" in volumes.columns else None
@@ -218,11 +219,56 @@ def compute_positioning(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataF
         }
 
     df = pd.DataFrame(rows).T.astype(float)
-    df["持仓拥挤"] = (
-        df["vol_trend_score"] * POSITIONING_W["volume_trend"]   +
-        df["beta_exp_score"]  * POSITIONING_W["beta_expansion"] +
-        df["rel_flow_score"]  * POSITIONING_W["relative_flow"]
-    ).round(1)
+
+    # ── AUM 资金沉淀密度（横截面排名）──────────────────────────────
+    # totalAssets / 20日均日成交额 → 资金沉淀越多、持仓越集中
+    aum_density = {}
+    for t in SECTOR_ETFS:
+        p = prices[t].dropna() if t in prices.columns else pd.Series(dtype=float)
+        v = volumes[t].dropna() if t in volumes.columns else pd.Series(dtype=float)
+        aum = float((info or {}).get(t, {}).get("totalAssets") or 0)
+        if aum > 0 and len(p) > 20 and len(v) > 20:
+            avg_dvol = float((p.iloc[-20:] * v.iloc[-20:]).mean())
+            aum_density[t] = aum / (avg_dvol + 1e-6)
+        else:
+            aum_density[t] = float("nan")
+
+    aum_s = pd.Series(aum_density, dtype=float)
+    n_aum = int(aum_s.notna().sum())
+    has_fund_flow = n_aum >= 3
+    for t in SECTOR_ETFS:
+        val = aum_s.get(t, float("nan"))
+        if has_fund_flow and not np.isnan(val):
+            df.loc[t, "fund_flow_score"] = round(
+                float((aum_s.dropna() < val).sum()) / max(n_aum, 1) * 100, 1)
+            df.loc[t, "fund_flow_raw"] = round(val, 1)
+        else:
+            df.loc[t, "fund_flow_score"] = float("nan")
+            df.loc[t, "fund_flow_raw"] = float("nan")
+
+    # 动态权重归一化（AUM 数据可能缺失）
+    w_vt = POSITIONING_W["volume_trend"]
+    w_be = POSITIONING_W["beta_expansion"]
+    w_rf = POSITIONING_W["relative_flow"]
+    w_ff = POSITIONING_W["fund_flow"]
+
+    if has_fund_flow:
+        ff_filled = pd.to_numeric(df["fund_flow_score"], errors="coerce").fillna(50)
+        total_w = w_vt + w_be + w_rf + w_ff
+        df["持仓拥挤"] = (
+            df["vol_trend_score"] * w_vt +
+            df["beta_exp_score"]  * w_be +
+            df["rel_flow_score"]  * w_rf +
+            ff_filled             * w_ff
+        ).round(1) / total_w
+    else:
+        total_w = w_vt + w_be + w_rf
+        df["持仓拥挤"] = (
+            df["vol_trend_score"] * w_vt +
+            df["beta_exp_score"]  * w_be +
+            df["rel_flow_score"]  * w_rf
+        ).round(1) / total_w
+
     df["持仓拥挤"] = _spread_stretch(df["持仓拥挤"])
     return df
 
@@ -708,15 +754,26 @@ def build_scorecard(ticker: str,
     # ── 持仓拥挤子指标 ─────────────────────────────────────────────────────────
     if ticker in p_df.index:
         r = p_df.loc[ticker]
+        # 判断 fund_flow 是否可用
+        ff_val = r.get("fund_flow_score", float("nan"))
+        ff_ok  = not _mth.isnan(safe_float(ff_val, float("nan")))
+        # 有效权重（动态归一化）
+        _pw_active = (POSITIONING_W["volume_trend"] +
+                      POSITIONING_W["beta_expansion"] +
+                      POSITIONING_W["relative_flow"] +
+                      (POSITIONING_W["fund_flow"] if ff_ok else 0))
+        def _eff_w(key):
+            return POSITIONING_W[key] / _pw_active
+
         items = [
             ("成交量中期趋势", "—",
-             r.get("vol_trend_score", 50),   POSITIONING_W["volume_trend"],
+             r.get("vol_trend_score", 50),   _eff_w("volume_trend"),
              "63日均量/252日均量——中期资金流入趋势"),
             ("Beta扩张",       "—",
-             r.get("beta_exp_score", 50),    POSITIONING_W["beta_expansion"],
+             r.get("beta_exp_score", 50),    _eff_w("beta_expansion"),
              "近期Beta/中期Beta——追涨资金流入信号"),
             ("相对SPY资金流",  "—",
-             r.get("rel_flow_score", 50),    POSITIONING_W["relative_flow"],
+             r.get("rel_flow_score", 50),    _eff_w("relative_flow"),
              "ETF成交额/SPY成交额历史分位——资金集中度代理"),
         ]
         for name, raw, score, w, desc in items:
@@ -725,6 +782,25 @@ def build_scorecard(ticker: str,
                              "历史分位": round(sf, 1), "维度内权重": f"{w*100:.0f}%",
                              "子项贡献": round(sf * w, 1), "说明": desc,
                              "status": "ok"})
+
+        # AUM 资金沉淀
+        if ff_ok:
+            ff_sf = safe_float(ff_val, 50)
+            ff_raw_v = r.get("fund_flow_raw", float("nan"))
+            ff_raw_s = f"{safe_float(ff_raw_v, 0):.0f}天" if not _mth.isnan(safe_float(ff_raw_v, float("nan"))) else "—"
+            records.append({"维度": "持仓拥挤", "子指标": "AUM资金沉淀",
+                             "原始值": ff_raw_s,
+                             "历史分位": round(ff_sf, 1),
+                             "维度内权重": f"{_eff_w('fund_flow')*100:.0f}%",
+                             "子项贡献": round(ff_sf * _eff_w("fund_flow"), 1),
+                             "说明": "totalAssets/日成交额——资金沉淀密度横截面排名",
+                             "status": "ok"})
+        else:
+            records.append({"维度": "持仓拥挤", "子指标": "AUM资金沉淀",
+                             "原始值": "N/A", "历史分位": float("nan"),
+                             "维度内权重": "0%（缺失）", "子项贡献": 0.0,
+                             "说明": "totalAssets 数据不可用，该项不参与评分",
+                             "status": "missing"})
 
     # ── 估值拥挤子指标 ─────────────────────────────────────────────────────────
     if ticker in v_df.index:
