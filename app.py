@@ -22,6 +22,7 @@ from factor_engine import (
     build_scorecard, compute_completeness,
 )
 from scoring import aggregate, commentary, get_level
+from history import compute_score_history, get_trend, get_trend_series, trend_arrow
 
 # ─── 页面配置 ─────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -582,9 +583,14 @@ def load_scores(w_tuple: tuple) -> tuple:
     cl_df = compute_clearance(prices)
 
     scores = aggregate(t_df, p_df, v_df, n_df, br_df, cl_df, weights)
+
+    # 计算历史拥挤度时序（60个交易日）
+    history = compute_score_history(prices, volumes, lookback=60, weights=weights)
+
     detail = dict(trading=t_df, positioning=p_df, valuation=v_df,
                   narrative=n_df, breadth=br_df, clearance=cl_df,
-                  prices=prices, volumes=volumes, pcr=pcr_d)
+                  prices=prices, volumes=volumes, pcr=pcr_d,
+                  history=history)
     return scores, detail
 
 
@@ -643,7 +649,7 @@ def sidebar():
 
 
 # ─── Tab 1: 总览 ─────────────────────────────────────────────────────────────
-def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
+def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame, history: pd.DataFrame = None):
     # 「如何理解这个分数」横幅
     st.markdown("""
 <div style="background:linear-gradient(135deg,#080e1e 0%,#0c1428 100%);
@@ -680,8 +686,31 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     with col_g:
         st.plotly_chart(gauge_fig(avg, "MARKET CROWDING TEMPERATURE"), use_container_width=True)
         level_now, _ = get_level(avg)
+        # 市场平均趋势
+        if history is not None:
+            tickers = [t for t in scores.index if t in SECTOR_ETFS]
+            total_cols = [(t, "总拥挤度") for t in tickers
+                          if (t, "总拥挤度") in history.columns]
+            if total_cols:
+                mkt_avg_hist = history[total_cols].mean(axis=1).dropna()
+                if len(mkt_avg_hist) >= 6:
+                    mkt_7d = float(mkt_avg_hist.iloc[-1] - mkt_avg_hist.iloc[-6])
+                    mkt_30d = float(mkt_avg_hist.iloc[-1] - mkt_avg_hist.iloc[0]) if len(mkt_avg_hist) >= 23 else None
+                    trend_html = (
+                        f'<div style="text-align:center;margin-top:4px;font-size:11px">'
+                        f'<span style="color:#6a7a9a">7D:</span> {trend_arrow(mkt_7d)}'
+                        f'&nbsp;&nbsp;<span style="color:#6a7a9a">30D:</span> {trend_arrow(mkt_30d)}'
+                        f'</div>'
+                    )
+                else:
+                    trend_html = ""
+            else:
+                trend_html = ""
+        else:
+            trend_html = ""
         st.markdown(
             f'<div style="text-align:center;margin-top:-4px">{badge(level_now)}</div>'
+            f'{trend_html}'
             f'<div style="text-align:center;font-size:11px;color:#536580;margin-top:8px;'
             f'font-family:Plus Jakarta Sans,sans-serif;line-height:1.5">'
             f'{LEVEL_DESC.get(level_now,"")[:50]}…</div>',
@@ -736,6 +765,9 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
             state_name = row.get("状态", "")
             state_color= row.get("状态色", c)
             state_expl = row.get("状态说明", "")
+            t_data = get_trend(history, tk) if history is not None else {}
+            t7 = trend_arrow(t_data.get("change_7d"))
+            t30 = trend_arrow(t_data.get("change_30d"))
             st.markdown(f"""
 <div class="card" style="border-left:3px solid {c}">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -746,6 +778,8 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
   </div>
   <div style="color:#64748b;font-size:11px;margin-top:5px;font-family:'Plus Jakarta Sans',sans-serif">
     主导维度: <span style="color:#94a3b8">{primary}</span>&nbsp;&nbsp;{badge(level_lbl)}
+    &nbsp;·&nbsp; <span style="color:#475569">7D</span>{t7}
+    &nbsp;<span style="color:#475569">30D</span>{t30}
   </div>
   <div style="margin-top:6px;padding:5px 10px;border-radius:6px;
        background:{row.get('状态背景','#0f1629')};display:inline-block">
@@ -768,6 +802,9 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
             _, c = get_level(s)
             narrative_s = float(row.get("叙事拥挤", 50))
             heating = "叙事维度开始升温，值得跟踪" if narrative_s > 50 else "各维度均处于历史低分位"
+            t_data = get_trend(history, tk) if history is not None else {}
+            t7 = trend_arrow(t_data.get("change_7d"))
+            t30 = trend_arrow(t_data.get("change_30d"))
             st.markdown(f"""
 <div class="card" style="border-left:3px solid #22c55e">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -776,14 +813,18 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     <span style="color:{c};font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;
            letter-spacing:-0.03em">{s:.0f}</span>
   </div>
-  <div style="color:#64748b;font-size:11px;margin-top:6px;font-family:'Plus Jakarta Sans',sans-serif">
+  <div style="color:#64748b;font-size:11px;margin-top:4px;font-family:'Plus Jakarta Sans',sans-serif">
+    <span style="color:#475569">7D</span>{t7}
+    &nbsp;<span style="color:#475569">30D</span>{t30}
+  </div>
+  <div style="color:#64748b;font-size:11px;margin-top:4px;font-family:'Plus Jakarta Sans',sans-serif">
     {heating}</div>
   <div style="color:#536580;font-size:11px;margin-top:4px">低拥挤阶段，做多赔率相对占优。</div>
 </div>""", unsafe_allow_html=True)
 
 
 # ─── Tab 2: 排名 ─────────────────────────────────────────────────────────────
-def tab_ranking(scores: pd.DataFrame):
+def tab_ranking(scores: pd.DataFrame, history: pd.DataFrame = None):
     # 分数区间说明条
     st.markdown(
         '<div style="font-size:10px;color:#536580;margin-bottom:5px;font-family:Outfit,sans-serif;'
@@ -868,9 +909,12 @@ def tab_ranking(scores: pd.DataFrame):
         cmt = commentary(row)
         s = float(row["总拥挤度"])
         level_lbl = row["拥挤等级"]
+        t_data = get_trend(history, tk) if history is not None else {}
         rows_out.append({
             "行业(ETF)":    f"{SECTOR_ETFS[tk]['name']}({tk})",
             "总分":          f"{s:.0f}",
+            "Δ7D":           f"{t_data['change_7d']:+.1f}" if t_data.get("change_7d") is not None else "—",
+            "Δ30D":          f"{t_data['change_30d']:+.1f}" if t_data.get("change_30d") is not None else "—",
             "等级":          level_lbl,
             "主导维度":      max(DIMS, key=lambda d: float(row.get(d, 0))),
             "操作信号":      cmt["action"],
@@ -881,7 +925,8 @@ def tab_ranking(scores: pd.DataFrame):
 
 
 # ─── Tab 3: 详情（玻璃箱核心页）─────────────────────────────────────────────
-def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
+def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict,
+               history: pd.DataFrame = None):
     cats_available = [c for c in CATEGORY_ORDER if any(
         SECTOR_ETFS[t]["category"] == c for t in SECTOR_ETFS
     )]
@@ -906,14 +951,23 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
     level_lbl, color = get_level(total)
     level_desc = LEVEL_DESC.get(level_lbl, "")
 
-    # ── 分数说明横幅
+    # ── 分数说明横幅（含趋势）
     banner_bg = {"极度拥挤": "#180606", "高拥挤": "#160c04",
                  "中等拥挤": "#100e04", "低拥挤": "#061008"}.get(level_lbl, "#0c1121")
+    t_data = get_trend(history, sel) if history is not None else {}
+    t7_html = trend_arrow(t_data.get("change_7d"))
+    t30_html = trend_arrow(t_data.get("change_30d"))
+    trend_span = (
+        f'&nbsp;&nbsp;<span style="font-size:11px">'
+        f'<span style="color:#475569">7D</span>{t7_html}'
+        f'&nbsp;<span style="color:#475569">30D</span>{t30_html}'
+        f'</span>'
+    ) if history is not None else ""
     st.markdown(
         f'<div class="score-banner" style="background:{banner_bg};border-color:{color}">'
         f'<span style="color:{color};font-size:26px;font-weight:800;'
         f'font-family:JetBrains Mono,monospace;letter-spacing:-0.03em">{total:.1f}</span>'
-        f'&nbsp;&nbsp;{badge(level_lbl)}&nbsp;&nbsp;&nbsp;'
+        f'&nbsp;&nbsp;{badge(level_lbl)}{trend_span}&nbsp;&nbsp;&nbsp;'
         f'<span style="color:#64748b;font-size:12px;font-family:Plus Jakarta Sans,sans-serif">'
         f'{level_desc}</span></div>',
         unsafe_allow_html=True
@@ -1233,13 +1287,61 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    # ── 拥挤度走势（60个交易日）
+    if history is not None and (sel, "总拥挤度") in history.columns:
+        st.markdown("---")
+        st.markdown("**拥挤度走势（过去60个交易日）**")
+        total_s = get_trend_series(history, sel, "总拥挤度")
+        if len(total_s) > 5:
+            fig_h = go.Figure()
+            # 背景色带
+            fig_h.add_hrect(y0=80, y1=100, fillcolor="#8b1010", opacity=0.08,
+                            line_width=0)
+            fig_h.add_hrect(y0=60, y1=80, fillcolor="#d35400", opacity=0.06,
+                            line_width=0)
+            fig_h.add_hrect(y0=35, y1=60, fillcolor="#b7950b", opacity=0.04,
+                            line_width=0)
+            fig_h.add_hrect(y0=0, y1=35, fillcolor="#1e8449", opacity=0.04,
+                            line_width=0)
+            # 总拥挤度
+            fig_h.add_trace(go.Scatter(
+                x=total_s.index, y=total_s.values,
+                name="总拥挤度", line=dict(color="#00d4aa", width=2.5),
+                fill="tozeroy", fillcolor="rgba(0,212,170,0.05)",
+            ))
+            # 各维度
+            dim_colors = {"交易拥挤": "#c0392b", "持仓拥挤": "#d4a017",
+                          "估值拥挤": "#8e44ad", "叙事拥挤": "#2980b9",
+                          "广度与领导权": "#27ae60"}
+            for dim in DIMS:
+                ds = get_trend_series(history, sel, dim)
+                if len(ds) > 5:
+                    fig_h.add_trace(go.Scatter(
+                        x=ds.index, y=ds.values,
+                        name=dim, line=dict(color=dim_colors.get(dim, "#666"),
+                                            width=1, dash="dot"),
+                        visible="legendonly",
+                    ))
+            fig_h.update_layout(
+                height=260, hovermode="x unified",
+                yaxis=dict(range=[0, 100], title="拥挤度得分"),
+                legend=dict(orientation="h", y=-0.25, font=dict(size=10)),
+                margin=dict(l=40, r=20, t=20, b=60), **PT,
+            )
+            st.plotly_chart(fig_h, use_container_width=True)
+            st.markdown(
+                '<div class="note">总拥挤度为实线，各维度可在图例中切换显示。'
+                '叙事维度历史值仅含动量加速度+收益偏度（无快照数据），绝对值可能与当前分数有偏差，趋势方向准确。</div>',
+                unsafe_allow_html=True
+            )
+
 
 # ─── Tab 4: 信号监控 ─────────────────────────────────────────────────────────
 def tab_signals(scores: pd.DataFrame):
     sig_col, tog_col = st.columns([3, 1])
     with sig_col:
         st.markdown(
-            '<div class="note">信号基于当前截面快照。拥挤度时序跟踪（是否快速上升）需历史快照积累，后续版本实现。</div>',
+            '<div class="note">信号基于当前截面快照。拥挤度时序趋势（7D/30D变化）已在排名表和详情页中显示。</div>',
             unsafe_allow_html=True
         )
     with tog_col:
@@ -1674,9 +1776,10 @@ def main():
         "  行业详情  ", "  信号监控  ",
         "  状态机说明  ", "  方法说明  "
     ])
-    with t1: tab_overview(scores, detail["prices"])
-    with t2: tab_ranking(scores)
-    with t3: tab_detail(scores, detail, weights)
+    history = detail.get("history")
+    with t1: tab_overview(scores, detail["prices"], history)
+    with t2: tab_ranking(scores, history)
+    with t3: tab_detail(scores, detail, weights, history)
     with t4: tab_signals(scores)
     with t5: tab_state_machine(scores)
     with t6: tab_method()
