@@ -12,8 +12,14 @@ import pandas as pd
 from config import (
     SECTOR_ETFS, DIMENSION_WEIGHTS,
     TRADING_W, POSITIONING_W, VALUATION_W, NARRATIVE_W,
-    BREADTH_W, CLEARANCE_W,
+    BREADTH_W, CLEARANCE_W, SPREAD_POWER,
 )
+
+
+def _spread_stretch(s):
+    """重新展开被加权平均压缩的维度分数，缓解方差塌缩。"""
+    z = (s - 50) / 50
+    return (50 + np.sign(z) * (np.abs(z) ** SPREAD_POWER) * 50).clip(0, 100).round(1)
 
 
 def _rolling_pct_rank(s: pd.Series, window: int = 252) -> pd.Series:
@@ -255,6 +261,14 @@ def compute_score_history(prices: pd.DataFrame,
             vspike_score.fillna(50)  * CLEARANCE_W["vol_spike"] +
             asym_score.fillna(50)    * CLEARANCE_W["return_asymmetry"]
         )
+
+        # ── 维度展幅（缓解方差塌缩）────────────────────────────────
+        trading     = _spread_stretch(trading)
+        positioning = _spread_stretch(positioning)
+        valuation   = _spread_stretch(valuation)
+        narrative   = _spread_stretch(narrative)
+        breadth     = _spread_stretch(breadth)
+        clearance   = _spread_stretch(clearance)
 
         # ── 总拥挤度 ──────────────────────────────────────────────────
         total = (

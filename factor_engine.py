@@ -11,7 +11,7 @@ from config import (
     SECTOR_ETFS,
     TRADING_W, POSITIONING_W, VALUATION_W, NARRATIVE_W,
     BREADTH_W, CLEARANCE_W, STATE_CONFIG,
-    INDICATOR_QUALITY, DIMENSION_WEIGHTS,
+    INDICATOR_QUALITY, DIMENSION_WEIGHTS, SPREAD_POWER,
 )
 
 
@@ -24,6 +24,13 @@ def hist_pct(series: pd.Series, value: float, window: int = 252) -> float:
         return 50.0
     hist = s.iloc[-window:] if len(s) > window else s
     return round(float((hist < value).sum() / len(hist) * 100), 1)
+
+
+def _spread_stretch(s):
+    """重新展开被加权平均压缩的维度分数，缓解方差塌缩。
+    单调映射 [0,100]→[0,100]，保持 0→0, 50→50, 100→100。"""
+    z = (s - 50) / 50
+    return (50 + np.sign(z) * (np.abs(z) ** SPREAD_POWER) * 50).clip(0, 100).round(1)
 
 
 def safe_float(val, default=50.0) -> float:
@@ -145,6 +152,7 @@ def compute_trading(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataFrame
         pp200_col                 * TRADING_W["price_prox_200"] +
         df["up_day_score"].fillna(50) * TRADING_W["up_day_ratio"]
     ).round(1)
+    df["交易拥挤"] = _spread_stretch(df["交易拥挤"])
     return df
 
 
@@ -215,6 +223,7 @@ def compute_positioning(prices: pd.DataFrame, volumes: pd.DataFrame) -> pd.DataF
         df["beta_exp_score"]  * POSITIONING_W["beta_expansion"] +
         df["rel_flow_score"]  * POSITIONING_W["relative_flow"]
     ).round(1)
+    df["持仓拥挤"] = _spread_stretch(df["持仓拥挤"])
     return df
 
 
@@ -305,6 +314,7 @@ def compute_valuation(prices: pd.DataFrame, info: Dict = None) -> pd.DataFrame:
         df["exc_score"]        * VALUATION_W["excess_vs_spy"] +
         pe_filled              * VALUATION_W["pe_proxy"]
     ).round(1)
+    df["估值拥挤"] = _spread_stretch(df["估值拥挤"])
     return df
 
 
@@ -415,7 +425,7 @@ def compute_narrative(prices: pd.DataFrame,
               "news_eff_w", "pcr_eff_w", "_narr_score"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    df["叙事拥挤"] = df["_narr_score"].round(1)
+    df["叙事拥挤"] = _spread_stretch(df["_narr_score"])
     df = df.drop(columns=["_narr_score"])
     return df
 
@@ -476,6 +486,7 @@ def compute_breadth(prices: pd.DataFrame) -> pd.DataFrame:
         df["trend_score"]      * BREADTH_W["trend_consistency"]   +
         df["div_score"]        * BREADTH_W["momentum_divergence"]
     ).round(1)
+    df["广度与领导权"] = _spread_stretch(df["广度与领导权"])
     return df
 
 
@@ -537,6 +548,7 @@ def compute_clearance(prices: pd.DataFrame) -> pd.DataFrame:
         df["vspike_score"]   * CLEARANCE_W["vol_spike"]         +
         df["rasym_score"]    * CLEARANCE_W["return_asymmetry"]
     ).round(1)
+    df["出清状态"] = _spread_stretch(df["出清状态"])
     return df
 
 
