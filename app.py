@@ -1348,10 +1348,10 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict,
                     margin=dict(l=50, r=50, t=20, b=60), **PT,
                 )
                 fig_rs.update_yaxes(title_text="超额收益(%)", secondary_y=False,
-                                    titlefont=dict(size=10, color="#6366f1"))
+                                    title_font=dict(size=10, color="#6366f1"))
                 fig_rs.update_yaxes(title_text="拥挤度", range=[0, 100],
                                     secondary_y=True,
-                                    titlefont=dict(size=10, color="#00d4aa"))
+                                    title_font=dict(size=10, color="#00d4aa"))
                 st.plotly_chart(fig_rs, use_container_width=True)
                 st.markdown(
                     '<div class="note">紫线=相对SPY的63天滚动超额收益，'
