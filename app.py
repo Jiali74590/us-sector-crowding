@@ -34,99 +34,284 @@ st.set_page_config(
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-[data-testid="stAppViewContainer"] { background:#0a0e1a; color:#d1d9e6; }
-[data-testid="stSidebar"] { background:#0d1220; border-right:1px solid #1a2540; }
-[data-testid="metric-container"] {
-    background:#111827; border:1px solid #1e3050;
-    border-radius:5px; padding:10px 14px;
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg-base: #060a14;
+  --bg-raised: #0c1121;
+  --bg-card: #0f1629;
+  --bg-card-hover: #131b33;
+  --border: #162040;
+  --border-light: #1e2d52;
+  --accent: #00e5b8;
+  --accent-glow: rgba(0,229,184,0.08);
+  --text-1: #e8ecf4;
+  --text-2: #94a3b8;
+  --text-3: #536580;
+  --text-4: #2d3f5a;
+  --score-ex: #ef4444;
+  --score-hi: #f97316;
+  --score-md: #eab308;
+  --score-lo: #22c55e;
+  --font-display: 'Outfit', -apple-system, 'PingFang SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --font-body: 'Plus Jakarta Sans', -apple-system, 'PingFang SC', sans-serif;
 }
-[data-testid="metric-container"] > div { color:#8899bb !important; font-size:11px; }
-[data-testid="metric-container"] > div > div { color:#c8d8e8 !important; font-size:20px; font-weight:600; }
-.stTabs [data-baseweb="tab-list"] { background:#0d1220; border-bottom:1px solid #1a2540; gap:0; }
-.stTabs [data-baseweb="tab"] { color:#6677aa; font-size:12px; letter-spacing:.04em; padding:8px 22px; }
-.stTabs [aria-selected="true"] { color:#00d4aa; border-bottom:2px solid #00d4aa; background:transparent; }
-hr { border-color:#1a2540 !important; }
-h1,h2,h3 { color:#c8d8e8 !important; font-weight:300 !important; letter-spacing:.03em; }
-[data-testid="stSidebar"] label { color:#8899aa !important; font-size:12px; }
-[data-testid="stDataFrame"] { border:1px solid #1a2540; border-radius:4px; }
-.note { color:#4a5a7a; font-size:11px; font-style:italic; }
-.bx { padding:2px 9px; border-radius:3px; font-size:11px; font-weight:700; }
-.bx-ex { background:#7b1e1e; color:#ffaaaa; }
-.bx-hi { background:#7b3b1e; color:#ffccaa; }
-.bx-md { background:#5a4a10; color:#ffe080; }
-.bx-lo { background:#1a4a2a; color:#88ee99; }
-.card { background:#111827; border:1px solid #1e3050; border-radius:5px;
-        padding:12px 16px; margin-bottom:8px; line-height:1.7; }
-.card-warn { border-left:3px solid #d35400; background:#130f08; }
-.card-info { border-left:3px solid #00d4aa; background:#08130f; }
-.card-note { border-left:3px solid #5577aa; background:#080d18; }
-.placeholder { color:#4a6060; font-size:10px; background:#0a1818;
-               border:1px dashed #1a3a3a; border-radius:3px; padding:1px 6px; }
+
+/* ── 全局覆写 ────────────────────────────────── */
+[data-testid="stAppViewContainer"] {
+    background: var(--bg-base); color: var(--text-2);
+    font-family: var(--font-body);
+}
+[data-testid="stSidebar"] {
+    background: var(--bg-raised);
+    border-right: 1px solid var(--border);
+    font-family: var(--font-body);
+}
+[data-testid="stSidebar"] label {
+    color: var(--text-3) !important; font-size: 11.5px;
+    font-family: var(--font-body);
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+}
+
+/* ── Metrics ── */
+[data-testid="metric-container"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px;
+    transition: border-color 0.2s;
+}
+[data-testid="metric-container"]:hover { border-color: var(--border-light); }
+[data-testid="metric-container"] > div {
+    color: var(--text-3) !important; font-size: 10px;
+    font-family: var(--font-body); text-transform: uppercase;
+    letter-spacing: 0.08em; font-weight: 500;
+}
+[data-testid="metric-container"] > div > div {
+    color: var(--text-1) !important; font-size: 22px; font-weight: 700;
+    font-family: var(--font-mono); letter-spacing: -0.02em;
+}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: var(--bg-raised);
+    border-bottom: 1px solid var(--border); gap: 0;
+    padding: 0 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    color: var(--text-3); font-size: 12px;
+    letter-spacing: 0.05em; padding: 10px 24px;
+    font-family: var(--font-display); font-weight: 500;
+    transition: color 0.2s;
+}
+.stTabs [data-baseweb="tab"]:hover { color: var(--text-2); }
+.stTabs [aria-selected="true"] {
+    color: var(--accent) !important;
+    border-bottom: 2px solid var(--accent);
+    background: transparent;
+}
+
+/* ── 通用 ── */
+hr { border-color: var(--border) !important; opacity: 0.6; }
+h1,h2,h3 {
+    color: var(--text-1) !important; font-weight: 400 !important;
+    font-family: var(--font-display) !important;
+    letter-spacing: -0.01em;
+}
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+[data-testid="stExpander"] {
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-raised);
+}
+[data-testid="stExpander"] summary {
+    font-family: var(--font-body); font-weight: 500;
+}
+
+/* ── 文字样式 ── */
+.note {
+    color: var(--text-3); font-size: 11px; font-style: italic;
+    font-family: var(--font-body);
+}
+
+/* ── 徽章 ── */
+.bx {
+    padding: 3px 10px; border-radius: 20px; font-size: 10px;
+    font-weight: 600; letter-spacing: 0.04em;
+    font-family: var(--font-display);
+    display: inline-block;
+}
+.bx-ex { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
+.bx-hi { background: rgba(249,115,22,0.15); color: #fdba74; border: 1px solid rgba(249,115,22,0.25); }
+.bx-md { background: rgba(234,179,8,0.15); color: #fde047; border: 1px solid rgba(234,179,8,0.25); }
+.bx-lo { background: rgba(34,197,94,0.15); color: #86efac; border: 1px solid rgba(34,197,94,0.25); }
+
+/* ── 卡片 ── */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    line-height: 1.75;
+    transition: border-color 0.2s, transform 0.15s;
+}
+.card:hover { border-color: var(--border-light); transform: translateY(-1px); }
+.card-warn {
+    border-left: 3px solid var(--score-hi);
+    background: linear-gradient(135deg, #140c04 0%, var(--bg-card) 100%);
+}
+.card-info {
+    border-left: 3px solid var(--accent);
+    background: linear-gradient(135deg, #041410 0%, var(--bg-card) 100%);
+}
+.card-note {
+    border-left: 3px solid #6366f1;
+    background: linear-gradient(135deg, #080820 0%, var(--bg-card) 100%);
+}
+.placeholder {
+    color: var(--text-4); font-size: 10px;
+    background: #060a10; border: 1px dashed var(--border);
+    border-radius: 4px; padding: 2px 8px;
+}
 
 /* ── 分数区间图例 */
-.legend-bar { display:flex; gap:0; border-radius:4px; overflow:hidden;
-              height:24px; margin:8px 0; font-size:11px; }
-.legend-seg { display:flex; align-items:center; justify-content:center;
-              flex:1; color:rgba(255,255,255,0.85); font-weight:600; }
+.legend-bar {
+    display: flex; gap: 0; border-radius: 6px; overflow: hidden;
+    height: 28px; margin: 10px 0; font-size: 11px;
+    font-family: var(--font-display);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+.legend-seg {
+    display: flex; align-items: center; justify-content: center;
+    flex: 1; color: rgba(255,255,255,0.9); font-weight: 600;
+    letter-spacing: 0.02em;
+}
 
 /* ── Tooltip */
-.tt { position:relative; display:inline; cursor:help; }
+.tt { position: relative; display: inline; cursor: help; }
 .tt .tip {
-    visibility:hidden; opacity:0;
-    position:absolute; z-index:9999;
-    bottom:130%; left:0;
-    width:270px; max-width:85vw;
-    background:#1a253f; border:1px solid #2a4060;
-    border-radius:5px; padding:10px 12px;
-    font-size:11px; line-height:1.65;
-    color:#c0d0e0; box-shadow:0 6px 20px rgba(0,0,0,0.7);
-    white-space:normal; pointer-events:none;
-    transition:opacity .12s;
+    visibility: hidden; opacity: 0;
+    position: absolute; z-index: 9999;
+    bottom: 130%; left: 0;
+    width: 290px; max-width: 85vw;
+    background: #111d38; border: 1px solid #243860;
+    border-radius: 8px; padding: 12px 14px;
+    font-size: 11px; line-height: 1.7;
+    font-family: var(--font-body);
+    color: #c0d0e0;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,229,184,0.05);
+    white-space: normal; pointer-events: none;
+    transition: opacity 0.15s, transform 0.15s;
+    transform: translateY(4px);
 }
-.tt:hover .tip { visibility:visible; opacity:1; }
-.tt-q { color:#3a5a8a; font-size:9px; vertical-align:super; margin-left:1px; }
+.tt:hover .tip { visibility: visible; opacity: 1; transform: translateY(0); }
+.tt-q {
+    color: var(--accent); font-size: 8px; vertical-align: super;
+    margin-left: 2px; opacity: 0.6;
+}
 
 /* ── 分数分解表 */
-.bk-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
-.bk-table th { color:#4a5a7a; font-size:10px; font-weight:400;
-               text-align:left; padding:3px 8px; border-bottom:1px solid #1a2540; }
-.bk-table td { padding:5px 8px; border-bottom:1px solid #111827; }
-.bk-total td { border-top:1px solid #2a3a5a !important; }
+.bk-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px; margin-top: 8px;
+    font-family: var(--font-body);
+}
+.bk-table th {
+    color: var(--text-3); font-size: 10px; font-weight: 500;
+    text-align: left; padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase; letter-spacing: 0.06em;
+}
+.bk-table td {
+    padding: 7px 10px; border-bottom: 1px solid rgba(22,32,64,0.5);
+    font-family: var(--font-mono); font-size: 11px;
+}
+.bk-table td:first-child { font-family: var(--font-body); font-size: 12px; }
+.bk-total td {
+    border-top: 2px solid var(--border-light) !important;
+    border-bottom: none !important;
+}
 
 /* ── 子指标行 */
-.sub-row { display:grid; grid-template-columns:140px 80px 1fr 50px 50px;
-           align-items:center; gap:8px; padding:5px 0;
-           border-bottom:1px solid #111827; font-size:12px; }
-.sub-bar-bg { background:#0d1522; border-radius:3px; height:5px; width:100%; }
-.sub-bar-fg { height:5px; border-radius:3px; }
-.dim-interp { margin-top:10px; padding:8px 12px; background:#08101e;
-              border-left:2px solid #2a5080; border-radius:3px;
-              font-size:12px; color:#8899aa; line-height:1.7; }
-.dim-meta { font-size:11px; color:#5a6a8a; margin-bottom:8px; line-height:1.6;
-            padding:6px 10px; background:#0a1020; border-radius:3px; }
+.sub-row {
+    display: grid; grid-template-columns: 140px 80px 1fr 50px 50px;
+    align-items: center; gap: 8px; padding: 6px 0;
+    border-bottom: 1px solid rgba(22,32,64,0.4); font-size: 12px;
+}
+.sub-bar-bg {
+    background: var(--bg-base); border-radius: 4px;
+    height: 6px; width: 100%;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+.sub-bar-fg { height: 6px; border-radius: 4px; }
+
+/* ── 维度解读 */
+.dim-interp {
+    margin-top: 12px; padding: 10px 14px;
+    background: linear-gradient(135deg, #060e1e 0%, #0a1428 100%);
+    border-left: 2px solid #3b82f6;
+    border-radius: 6px;
+    font-size: 12px; color: var(--text-2); line-height: 1.75;
+    font-family: var(--font-body);
+}
+.dim-meta {
+    font-size: 11px; color: var(--text-3); margin-bottom: 10px; line-height: 1.65;
+    padding: 8px 12px; background: var(--bg-base);
+    border-radius: 6px; border: 1px solid rgba(22,32,64,0.3);
+}
 
 /* ── 方法说明页 */
-.method-section { background:#0d1220; border:1px solid #1a2540;
-                  border-radius:6px; padding:16px 20px; margin-bottom:14px; }
-.method-h { color:#00d4aa; font-size:13px; font-weight:600;
-            letter-spacing:.04em; margin-bottom:8px; }
-.method-body { color:#8899aa; font-size:12px; line-height:1.85; }
-.method-body b { color:#c8d8e8; }
-.data-status { display:inline-block; padding:2px 8px; border-radius:3px;
-               font-size:10px; font-weight:600; margin-right:4px; }
-.ds-live { background:#0d3020; color:#44ee88; border:1px solid #1a5030; }
-.ds-proxy { background:#2a2010; color:#ddaa44; border:1px solid #5a4010; }
-.ds-placeholder { background:#0a0a1a; color:#445566; border:1px dashed #2a3050; }
+.method-section {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px 24px; margin-bottom: 16px;
+}
+.method-h {
+    color: var(--accent); font-size: 14px; font-weight: 600;
+    font-family: var(--font-display);
+    letter-spacing: 0.02em; margin-bottom: 10px;
+}
+.method-body {
+    color: var(--text-2); font-size: 12.5px; line-height: 1.9;
+    font-family: var(--font-body);
+}
+.method-body b { color: var(--text-1); font-weight: 600; }
+.data-status {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 10px; font-weight: 600; margin-right: 6px;
+    font-family: var(--font-display);
+}
+.ds-live { background: rgba(34,197,94,0.12); color: #86efac; border: 1px solid rgba(34,197,94,0.2); }
+.ds-proxy { background: rgba(234,179,8,0.12); color: #fde047; border: 1px solid rgba(234,179,8,0.2); }
+.ds-placeholder { background: rgba(100,116,139,0.08); color: #64748b; border: 1px dashed rgba(100,116,139,0.2); }
 
 /* ── 分数说明横幅 */
-.score-banner { padding:8px 14px; border-radius:4px; font-size:12px;
-                margin-bottom:10px; border-left:3px solid; line-height:1.6; }
+.score-banner {
+    padding: 12px 18px; border-radius: 8px; font-size: 12px;
+    margin-bottom: 14px; border-left: 3px solid; line-height: 1.65;
+    font-family: var(--font-body);
+}
+
+/* ── 按钮 */
+[data-testid="stSidebar"] button[kind="secondary"] {
+    border-radius: 8px; font-family: var(--font-display);
+    font-weight: 500; letter-spacing: 0.03em;
+    transition: all 0.2s;
+}
+
+/* ── 数字强调 */
+.mono-num {
+    font-family: var(--font-mono); font-weight: 600;
+    letter-spacing: -0.02em;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ─── 常量 / 工具 ──────────────────────────────────────────────────────────────
-PT = dict(paper_bgcolor="#0a0e1a", plot_bgcolor="#111827",
-          font=dict(color="#99aabb", size=11))
+PT = dict(paper_bgcolor="#060a14", plot_bgcolor="#0c1121",
+          font=dict(color="#94a3b8", size=11, family="Outfit, Plus Jakarta Sans, sans-serif"))
 DIMS = ["叙事拥挤", "持仓拥挤", "交易拥挤", "估值拥挤", "广度与领导权"]
 
 LEVEL_DESC = {
@@ -159,10 +344,10 @@ def tt(label: str, key: str) -> str:
 
 
 def score_color(v: float) -> str:
-    if v >= 70: return "#c0392b"
-    if v >= 58: return "#d35400"
-    if v >= 42: return "#b7950b"
-    return "#1e8449"
+    if v >= 70: return "#ef4444"
+    if v >= 58: return "#f97316"
+    if v >= 42: return "#eab308"
+    return "#22c55e"
 
 
 def gauge_fig(value: float, title: str) -> go.Figure:
@@ -170,48 +355,51 @@ def gauge_fig(value: float, title: str) -> go.Figure:
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=value,
-        number=dict(font=dict(size=34, color=color)),
-        title=dict(text=title, font=dict(size=12, color="#6677aa")),
+        number=dict(font=dict(size=38, color=color, family="JetBrains Mono, monospace")),
+        title=dict(text=title, font=dict(size=12, color="#536580",
+                   family="Outfit, Plus Jakarta Sans, sans-serif")),
         gauge=dict(
-            axis=dict(range=[0, 100], tickwidth=1, tickcolor="#1a2540",
-                      tickfont=dict(size=9, color="#4a5a7a")),
+            axis=dict(range=[0, 100], tickwidth=1, tickcolor="#162040",
+                      tickfont=dict(size=9, color="#475569")),
             bar=dict(color=color, thickness=0.22),
-            bgcolor="#0d1220",
+            bgcolor="#0a0f1c",
             steps=[
-                {"range": [0,  35], "color": "#0a1a10"},
-                {"range": [35, 60], "color": "#1a1a08"},
-                {"range": [60, 80], "color": "#1a0d08"},
-                {"range": [80,100], "color": "#1a0808"},
+                {"range": [0,  35], "color": "rgba(34,197,94,0.06)"},
+                {"range": [35, 60], "color": "rgba(234,179,8,0.06)"},
+                {"range": [60, 80], "color": "rgba(249,115,22,0.06)"},
+                {"range": [80,100], "color": "rgba(239,68,68,0.06)"},
             ],
             threshold=dict(line=dict(color=color, width=2),
                            thickness=0.75, value=value),
         ),
     ))
-    fig.update_layout(height=180, margin=dict(l=15, r=15, t=40, b=10), **PT)
+    fig.update_layout(height=190, margin=dict(l=15, r=15, t=42, b=10), **PT)
     return fig
 
 
-def radar_fig(dim_scores: dict, label: str, color: str = "#00d4aa") -> go.Figure:
+def radar_fig(dim_scores: dict, label: str, color: str = "#00e5b8") -> go.Figure:
     cats = DIMS + [DIMS[0]]
     vals = [dim_scores.get(d, 50) for d in DIMS] + [dim_scores.get(DIMS[0], 50)]
     fig  = go.Figure(go.Scatterpolar(
         r=vals, theta=cats, fill="toself",
-        line=dict(color=color, width=2),
-        fillcolor="rgba(0,212,170,0.10)",
+        line=dict(color=color, width=2.5),
+        fillcolor=f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.08)",
         name=label,
     ))
     fig.update_layout(
         polar=dict(
-            bgcolor="#0d1220",
+            bgcolor="#080e1c",
             radialaxis=dict(range=[0,100], visible=True,
-                            tickfont=dict(size=8, color="#3a4a5a"),
-                            gridcolor="#1a2540", linecolor="#1a2540"),
-            angularaxis=dict(tickfont=dict(size=10, color="#8899bb"),
-                             gridcolor="#1a2540", linecolor="#1a2540"),
+                            tickfont=dict(size=8, color="#334155",
+                                          family="JetBrains Mono, monospace"),
+                            gridcolor="#162040", linecolor="#162040"),
+            angularaxis=dict(tickfont=dict(size=10, color="#94a3b8",
+                                           family="Plus Jakarta Sans, sans-serif"),
+                             gridcolor="#162040", linecolor="#162040"),
         ),
-        paper_bgcolor="#0a0e1a", height=270,
+        paper_bgcolor="#060a14", height=280,
         showlegend=False,
-        margin=dict(l=45, r=45, t=20, b=20),
+        margin=dict(l=48, r=48, t=20, b=20),
     )
     return fig
 
@@ -219,10 +407,10 @@ def radar_fig(dim_scores: dict, label: str, color: str = "#00d4aa") -> go.Figure
 def score_range_legend() -> str:
     """返回分数区间图例 HTML"""
     segs = [
-        ("#0a3a1a", "0–35", "低拥挤"),
-        ("#3a3008", "35–60", "中等"),
-        ("#5a2808", "60–80", "高拥挤"),
-        ("#6a1010", "80–100", "极度"),
+        ("rgba(34,197,94,0.15)", "0–35", "低拥挤"),
+        ("rgba(234,179,8,0.15)", "35–60", "中等"),
+        ("rgba(249,115,22,0.15)", "60–80", "高拥挤"),
+        ("rgba(239,68,68,0.15)", "80–100", "极度"),
     ]
     inner = "".join(
         f'<div class="legend-seg" style="background:{c}">'
@@ -246,17 +434,17 @@ def score_breakdown_html(row: pd.Series, weights: dict) -> str:
         dim_tt = tt(d, d)
         tbody += (
             f"<tr>"
-            f"<td style='color:#8899bb'>{dim_tt}</td>"
+            f"<td style='color:#94a3b8;font-family:Plus Jakarta Sans,sans-serif'>{dim_tt}</td>"
             f"<td style='color:{sc};font-weight:600;text-align:center'>{score:.1f}</td>"
-            f"<td style='color:#6677aa;text-align:center'>{w*100:.0f}%</td>"
-            f"<td style='color:#aabb88;text-align:right;font-weight:600'>{contrib:.1f}</td>"
+            f"<td style='color:#536580;text-align:center'>{w*100:.0f}%</td>"
+            f"<td style='color:#a3e635;text-align:right;font-weight:600'>{contrib:.1f}</td>"
             f"</tr>"
         )
     tbody += (
         f"<tr class='bk-total'>"
-        f"<td style='color:#c8d8e8;font-weight:600'>合计</td>"
+        f"<td style='color:#e8ecf4;font-weight:600;font-family:Plus Jakarta Sans,sans-serif'>合计</td>"
         f"<td></td><td></td>"
-        f"<td style='color:#00d4aa;font-weight:700;font-size:14px;text-align:right'>{total_contrib:.1f}</td>"
+        f"<td style='color:#00e5b8;font-weight:700;font-size:15px;text-align:right;font-family:JetBrains Mono,monospace;letter-spacing:-0.02em'>{total_contrib:.1f}</td>"
         f"</tr>"
     )
     return (
@@ -270,20 +458,24 @@ def score_breakdown_html(row: pd.Series, weights: dict) -> str:
 
 
 TIER_BADGE = {
-    "real":    '<span style="background:#0d3020;color:#44ee88;border:1px solid #1a5030;'
-               'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">真实数据</span>',
-    "proxy":   '<span style="background:#2a2010;color:#ddaa44;border:1px solid #5a4010;'
-               'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">代理变量</span>',
-    "missing": '<span style="background:#0a0a1a;color:#445566;border:1px dashed #2a3050;'
-               'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">暂未接入</span>',
-    "data_missing": '<span style="background:#1a0a08;color:#ee6644;border:1px dashed #7a3020;'
-                    'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600">数据缺失</span>',
+    "real":    '<span style="background:rgba(34,197,94,0.12);color:#86efac;'
+               'border:1px solid rgba(34,197,94,0.2);border-radius:20px;'
+               'padding:2px 7px;font-size:9px;font-weight:600;font-family:Outfit,sans-serif">真实数据</span>',
+    "proxy":   '<span style="background:rgba(234,179,8,0.12);color:#fde047;'
+               'border:1px solid rgba(234,179,8,0.2);border-radius:20px;'
+               'padding:2px 7px;font-size:9px;font-weight:600;font-family:Outfit,sans-serif">代理变量</span>',
+    "missing": '<span style="background:rgba(100,116,139,0.08);color:#64748b;'
+               'border:1px dashed rgba(100,116,139,0.2);border-radius:20px;'
+               'padding:2px 7px;font-size:9px;font-weight:600;font-family:Outfit,sans-serif">暂未接入</span>',
+    "data_missing": '<span style="background:rgba(239,68,68,0.1);color:#fca5a5;'
+                    'border:1px dashed rgba(239,68,68,0.2);border-radius:20px;'
+                    'padding:2px 7px;font-size:9px;font-weight:600;font-family:Outfit,sans-serif">数据缺失</span>',
 }
 
 CONFIDENCE_STYLE = {
-    "高": ("color:#44ee88", "高"),
-    "中": ("color:#ddaa44", "中"),
-    "低": ("color:#ee4444", "低"),
+    "高": ("color:#22c55e", "高"),
+    "中": ("color:#eab308", "中"),
+    "低": ("color:#ef4444", "低"),
 }
 
 
@@ -291,28 +483,36 @@ def completeness_banner(comp: dict) -> str:
     pct = comp["completeness_pct"]
     conf, conf_label = CONFIDENCE_STYLE[comp["confidence"]][:1], comp["confidence"]
     conf_color = CONFIDENCE_STYLE[comp["confidence"]][0]
-    bar_color = "#44ee88" if pct >= 78 else "#ddaa44" if pct >= 60 else "#ee4444"
+    bar_color = "#22c55e" if pct >= 78 else "#eab308" if pct >= 60 else "#ef4444"
 
     dim_rows = "".join(
-        f'<div style="display:flex;justify-content:space-between;padding:2px 0;'
-        f'font-size:11px;border-bottom:1px solid #0d1520">'
-        f'<span style="color:#7a8a9a">{d}</span>'
-        f'<span style="color:{bar_color}">{v:.0f}%</span></div>'
+        f'<div style="display:flex;justify-content:space-between;padding:3px 0;'
+        f'font-size:11px;border-bottom:1px solid rgba(22,32,64,0.3);'
+        f'font-family:Plus Jakarta Sans,sans-serif">'
+        f'<span style="color:#64748b">{d}</span>'
+        f'<span style="color:{bar_color};font-family:JetBrains Mono,monospace;'
+        f'font-weight:500">{v:.0f}%</span></div>'
         for d, v in comp["dim_completeness"].items()
     )
     return (
-        f'<div style="background:#0a1020;border:1px solid #1a2a3a;border-radius:5px;'
-        f'padding:10px 14px;margin-bottom:10px">'
-        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-        f'<span style="color:#6a7a9a;font-size:11px">数据完整度</span>'
-        f'<span style="font-size:18px;font-weight:700;color:{bar_color}">{pct:.0f}%</span>'
+        f'<div style="background:#080e1e;border:1px solid #162040;border-radius:8px;'
+        f'padding:12px 16px;margin-bottom:12px">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+        f'<span style="color:#536580;font-size:10px;font-family:Outfit,sans-serif;'
+        f'font-weight:600;letter-spacing:0.1em;text-transform:uppercase">DATA COMPLETENESS</span>'
+        f'<span style="font-size:20px;font-weight:700;color:{bar_color};'
+        f'font-family:JetBrains Mono,monospace;letter-spacing:-0.02em">{pct:.0f}%</span>'
         f'</div>'
-        f'<div style="background:#0d1420;border-radius:3px;height:5px;margin-bottom:8px">'
-        f'<div style="width:{pct}%;background:{bar_color};height:5px;border-radius:3px"></div></div>'
+        f'<div style="background:#060a14;border-radius:4px;height:6px;margin-bottom:10px;'
+        f'box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)">'
+        f'<div style="width:{pct}%;background:{bar_color};height:6px;border-radius:4px;'
+        f'transition:width 0.3s"></div></div>'
         f'{dim_rows}'
-        f'<div style="margin-top:8px;display:flex;gap:8px;align-items:center">'
-        f'<span style="color:#4a5a7a;font-size:10px">评分置信度：</span>'
-        f'<span style="font-size:12px;font-weight:600;{conf_color}">{comp["confidence"]}</span>'
+        f'<div style="margin-top:10px;display:flex;gap:8px;align-items:center">'
+        f'<span style="color:#475569;font-size:10px;font-family:Outfit,sans-serif;'
+        f'letter-spacing:0.06em">CONFIDENCE:</span>'
+        f'<span style="font-size:12px;font-weight:600;font-family:Outfit,sans-serif;'
+        f'{conf_color}">{comp["confidence"]}</span>'
         f'</div></div>'
     )
 
@@ -392,15 +592,23 @@ def load_scores(w_tuple: tuple) -> tuple:
 def sidebar():
     with st.sidebar:
         st.markdown(
-            '<div style="color:#00d4aa;font-size:15px;font-weight:600;letter-spacing:.08em">'
-            '⚡ CROWDING MONITOR</div>'
-            '<div style="color:#4a5a7a;font-size:11px;margin-bottom:12px">'
-            '六层框架 · 出清状态 · 赔率视角 v3.0</div>',
+            '<div style="padding:4px 0 16px 0">'
+            '<div style="font-family:Outfit,sans-serif;font-size:11px;font-weight:600;'
+            'letter-spacing:0.18em;text-transform:uppercase;color:#536580;margin-bottom:4px">SECTOR</div>'
+            '<div style="font-family:Outfit,sans-serif;font-size:22px;font-weight:700;'
+            'letter-spacing:-0.02em;color:#00e5b8;line-height:1.1">Crowding<br>'
+            '<span style="color:#e8ecf4">Monitor</span></div>'
+            '<div style="font-family:Plus Jakarta Sans,sans-serif;color:#475569;'
+            'font-size:10.5px;margin-top:8px;letter-spacing:0.03em">'
+            '六层框架 · 出清状态机 · 赔率视角 v3.0</div></div>',
             unsafe_allow_html=True
         )
         st.markdown("---")
-        st.markdown('<div style="color:#6677aa;font-size:11px;margin-bottom:6px">维度权重（合计需=100%）</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-family:Outfit,sans-serif;color:#536580;font-size:10px;'
+            'font-weight:600;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:8px">'
+            'DIMENSION WEIGHTS</div>',
+            unsafe_allow_html=True)
         dw = {}
         for dim, default in [("叙事拥挤",20),("持仓拥挤",18),("交易拥挤",22),
                               ("估值拥挤",20),("广度与领导权",20)]:
@@ -409,23 +617,27 @@ def sidebar():
         if abs(total_w - 1.0) > 0.01:
             st.warning(f"权重合计 {total_w:.0%}，标准为 100%")
         else:
-            st.markdown('<div style="color:#1e8449;font-size:11px">✓ 权重已归一化</div>',
-                        unsafe_allow_html=True)
+            st.markdown(
+                '<div style="color:#22c55e;font-size:10px;font-family:Outfit,sans-serif;'
+                'font-weight:500;letter-spacing:0.04em">'
+                '&#10003; Normalized to 100%</div>',
+                unsafe_allow_html=True)
         st.markdown("---")
-        if st.button("🔄 刷新数据", use_container_width=True):
+        if st.button("刷新数据", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
         st.markdown("---")
-        st.markdown(f'<div class="note">更新: {datetime.now().strftime("%m/%d %H:%M")}</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="color:#475569;font-size:10px;font-family:JetBrains Mono,monospace;'
+            f'letter-spacing:0.04em">'
+            f'UPDATED {datetime.now().strftime("%m/%d %H:%M")}</div>',
+            unsafe_allow_html=True)
         st.markdown("""
-<div style="font-size:11px;line-height:2;margin-top:8px">
-<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">价格/成交量 (真实)</span><br>
-<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">RSI / 动量 / 波动率 (真实)</span><br>
-<span style="color:#3a7a4a">✅</span> <span style="color:#5a7a5a">期权 P/C Ratio (真实)</span><br>
-<span style="color:#5a7a4a">⚠️</span> <span style="color:#4a6a4a">Beta扩张 (代理指标)</span><br>
-<span style="color:#5a7a4a">⚠️</span> <span style="color:#4a6a4a">媒体热度 (代理变量)</span><br>
-<span style="color:#3a4a5a">🔲</span> <span style="color:#3a4a5a">基金持仓 (暂未接入)</span>
+<div style="font-size:11px;line-height:2.2;margin-top:10px;font-family:'Plus Jakarta Sans',sans-serif">
+<span style="color:#22c55e">&#9679;</span> <span style="color:#64748b">价格/成交量 · RSI · 动量 · 波动率</span><br>
+<span style="color:#22c55e">&#9679;</span> <span style="color:#64748b">期权 P/C Ratio</span><br>
+<span style="color:#eab308">&#9679;</span> <span style="color:#536580">Beta扩张 · 媒体热度 (代理)</span><br>
+<span style="color:#334155">&#9675;</span> <span style="color:#334155">基金持仓 (暂未接入)</span>
 </div>""", unsafe_allow_html=True)
     return dw
 
@@ -434,23 +646,26 @@ def sidebar():
 def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     # 「如何理解这个分数」横幅
     st.markdown("""
-<div style="background:#0d1525;border:1px solid #1a2a4a;border-radius:6px;
-     padding:12px 18px;margin-bottom:14px">
-  <div style="color:#00d4aa;font-size:12px;font-weight:600;margin-bottom:6px">
-    📖 如何理解这个分数？</div>
-  <div style="display:flex;gap:0;border-radius:4px;overflow:hidden;height:20px;margin-bottom:8px">
-    <div style="flex:35;background:#0a3a1a;display:flex;align-items:center;justify-content:center;
-         font-size:10px;color:#88ee88;font-weight:600">0–35 低拥挤</div>
-    <div style="flex:25;background:#2a2808;display:flex;align-items:center;justify-content:center;
-         font-size:10px;color:#ddcc44;font-weight:600">35–60 中等</div>
-    <div style="flex:20;background:#4a1e08;display:flex;align-items:center;justify-content:center;
-         font-size:10px;color:#ffaa66;font-weight:600">60–80 高拥挤</div>
-    <div style="flex:20;background:#6a0808;display:flex;align-items:center;justify-content:center;
-         font-size:10px;color:#ffaaaa;font-weight:600">80–100 极度</div>
+<div style="background:linear-gradient(135deg,#080e1e 0%,#0c1428 100%);
+     border:1px solid #162040;border-radius:10px;
+     padding:16px 22px;margin-bottom:16px">
+  <div style="font-family:Outfit,sans-serif;color:#00e5b8;font-size:12px;
+       font-weight:600;margin-bottom:8px;letter-spacing:0.04em">
+    HOW TO READ THE SCORE</div>
+  <div style="display:flex;gap:2px;border-radius:6px;overflow:hidden;height:24px;margin-bottom:10px;
+       box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)">
+    <div style="flex:35;background:rgba(34,197,94,0.12);display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#86efac;font-weight:600;font-family:Outfit,sans-serif">0–35 低拥挤</div>
+    <div style="flex:25;background:rgba(234,179,8,0.12);display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#fde047;font-weight:600;font-family:Outfit,sans-serif">35–60 中等</div>
+    <div style="flex:20;background:rgba(249,115,22,0.12);display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#fdba74;font-weight:600;font-family:Outfit,sans-serif">60–80 高拥挤</div>
+    <div style="flex:20;background:rgba(239,68,68,0.12);display:flex;align-items:center;justify-content:center;
+         font-size:10px;color:#fca5a5;font-weight:600;font-family:Outfit,sans-serif">80–100 极度</div>
   </div>
-  <div style="color:#6a7a9a;font-size:11px;line-height:1.7">
-    <b style="color:#8899bb">高分不代表马上跌</b>，而代表继续上涨所需的新信息门槛在升高、赔率在下降。
-    <b style="color:#8899bb">低分不代表马上涨</b>，而代表当前不拥挤、潜在赔率相对更好。
+  <div style="font-family:'Plus Jakarta Sans',sans-serif;color:#64748b;font-size:11px;line-height:1.75">
+    <b style="color:#94a3b8">高分不代表马上跌</b>，而代表继续上涨所需的新信息门槛在升高、赔率在下降。
+    <b style="color:#94a3b8">低分不代表马上涨</b>，而代表当前不拥挤、潜在赔率相对更好。
     这个工具判断的是「行业被市场挤得有多满」，而不是预测涨跌。
   </div>
 </div>
@@ -463,11 +678,12 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
 
     col_g, col_r = st.columns([1, 2])
     with col_g:
-        st.plotly_chart(gauge_fig(avg, "市场整体拥挤温度"), use_container_width=True)
+        st.plotly_chart(gauge_fig(avg, "MARKET CROWDING TEMPERATURE"), use_container_width=True)
         level_now, _ = get_level(avg)
         st.markdown(
-            f'<div style="text-align:center;margin-top:-6px">{badge(level_now)}</div>'
-            f'<div style="text-align:center;font-size:11px;color:#5a6a7a;margin-top:6px">'
+            f'<div style="text-align:center;margin-top:-4px">{badge(level_now)}</div>'
+            f'<div style="text-align:center;font-size:11px;color:#536580;margin-top:8px;'
+            f'font-family:Plus Jakarta Sans,sans-serif;line-height:1.5">'
             f'{LEVEL_DESC.get(level_now,"")[:50]}…</div>',
             unsafe_allow_html=True
         )
@@ -491,9 +707,13 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
             s = float(row["总拥挤度"])
             _, c = get_level(s)
             cols_strip[i].markdown(
-                f'<div style="background:{c};border-radius:3px;padding:3px 2px;'
-                f'text-align:center;font-size:9px;color:white;line-height:1.4">'
-                f'<b>{tk}</b><br>{s:.0f}</div>',
+                f'<div style="background:rgba({int(c[1:3],16)},{int(c[3:5],16)},{int(c[5:7],16)},0.15);'
+                f'border:1px solid rgba({int(c[1:3],16)},{int(c[3:5],16)},{int(c[5:7],16)},0.3);'
+                f'border-radius:6px;padding:4px 2px;'
+                f'text-align:center;font-size:9px;color:{c};line-height:1.4;'
+                f'font-family:Outfit,sans-serif">'
+                f'<b>{tk}</b><br>'
+                f'<span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:10px">{s:.0f}</span></div>',
                 unsafe_allow_html=True
             )
 
@@ -501,8 +721,11 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
     col_hot, col_cold = st.columns(2)
 
     with col_hot:
-        st.markdown('<div style="color:#c0392b;font-weight:600;margin-bottom:6px">🔴 最拥挤行业</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-family:Outfit,sans-serif;color:#ef4444;font-weight:600;'
+            'font-size:13px;letter-spacing:0.04em;margin-bottom:8px">'
+            'MOST CROWDED</div>',
+            unsafe_allow_html=True)
         for tk, row in top3.iterrows():
             s = float(row["总拥挤度"])
             _, c = get_level(s)
@@ -514,38 +737,48 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
             state_color= row.get("状态色", c)
             state_expl = row.get("状态说明", "")
             st.markdown(f"""
-<div class="card">
+<div class="card" style="border-left:3px solid {c}">
   <div style="display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#c8d8e8;font-weight:600">{row['行业']} <span style="color:#4a5a7a">({tk})</span></span>
-    <span style="color:{c};font-size:22px;font-weight:700">{s:.0f}</span>
+    <span style="font-family:'Plus Jakarta Sans',sans-serif;color:#e8ecf4;font-weight:600">
+      {row['行业']} <span style="color:#475569;font-weight:400">({tk})</span></span>
+    <span style="color:{c};font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;
+           letter-spacing:-0.03em">{s:.0f}</span>
   </div>
-  <div style="color:#6677aa;font-size:11px;margin-top:4px">
-    主导维度: <span style="color:#8899bb">{primary}</span> · {badge(level_lbl)}
+  <div style="color:#64748b;font-size:11px;margin-top:5px;font-family:'Plus Jakarta Sans',sans-serif">
+    主导维度: <span style="color:#94a3b8">{primary}</span>&nbsp;&nbsp;{badge(level_lbl)}
   </div>
-  <div style="margin-top:5px;padding:4px 8px;border-radius:3px;
-       background:{row.get('状态背景','#111827')};display:inline-block">
-    <span style="color:{state_color};font-size:11px;font-weight:600">{state_icon} {state_name}</span>
-    <span style="color:#4a5a6a;font-size:10px;margin-left:8px">{row.get('操作偏向','')}</span>
+  <div style="margin-top:6px;padding:5px 10px;border-radius:6px;
+       background:{row.get('状态背景','#0f1629')};display:inline-block">
+    <span style="color:{state_color};font-size:11px;font-weight:600;font-family:Outfit,sans-serif">
+      {state_icon} {state_name}</span>
+    <span style="color:#475569;font-size:10px;margin-left:10px">{row.get('操作偏向','')}</span>
   </div>
-  <div style="color:#7a8a9a;font-size:10px;margin-top:4px;line-height:1.5">{state_expl}</div>
+  <div style="color:#64748b;font-size:10px;margin-top:5px;line-height:1.55;
+       font-family:'Plus Jakarta Sans',sans-serif">{state_expl}</div>
 </div>""", unsafe_allow_html=True)
 
     with col_cold:
-        st.markdown('<div style="color:#1e8449;font-weight:600;margin-bottom:6px">🟢 低拥挤 / 赔率相对合理</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-family:Outfit,sans-serif;color:#22c55e;font-weight:600;'
+            'font-size:13px;letter-spacing:0.04em;margin-bottom:8px">'
+            'LEAST CROWDED</div>',
+            unsafe_allow_html=True)
         for tk, row in bot3.iterrows():
             s = float(row["总拥挤度"])
             _, c = get_level(s)
             narrative_s = float(row.get("叙事拥挤", 50))
-            heating = "⚡ 叙事维度开始升温，值得跟踪" if narrative_s > 50 else "各维度均处于历史低分位"
+            heating = "叙事维度开始升温，值得跟踪" if narrative_s > 50 else "各维度均处于历史低分位"
             st.markdown(f"""
-<div class="card">
+<div class="card" style="border-left:3px solid #22c55e">
   <div style="display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#c8d8e8;font-weight:600">{row['行业']} <span style="color:#4a5a7a">({tk})</span></span>
-    <span style="color:{c};font-size:22px;font-weight:700">{s:.0f}</span>
+    <span style="font-family:'Plus Jakarta Sans',sans-serif;color:#e8ecf4;font-weight:600">
+      {row['行业']} <span style="color:#475569;font-weight:400">({tk})</span></span>
+    <span style="color:{c};font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;
+           letter-spacing:-0.03em">{s:.0f}</span>
   </div>
-  <div style="color:#4a7a5a;font-size:11px;margin-top:6px">{heating}</div>
-  <div style="color:#3a6a3a;font-size:11px;margin-top:4px">低拥挤阶段，做多赔率相对占优。</div>
+  <div style="color:#64748b;font-size:11px;margin-top:6px;font-family:'Plus Jakarta Sans',sans-serif">
+    {heating}</div>
+  <div style="color:#536580;font-size:11px;margin-top:4px">低拥挤阶段，做多赔率相对占优。</div>
 </div>""", unsafe_allow_html=True)
 
 
@@ -553,9 +786,10 @@ def tab_overview(scores: pd.DataFrame, prices: pd.DataFrame):
 def tab_ranking(scores: pd.DataFrame):
     # 分数区间说明条
     st.markdown(
-        '<div style="font-size:11px;color:#5a6a7a;margin-bottom:4px">分数区间参考：</div>'
+        '<div style="font-size:10px;color:#536580;margin-bottom:5px;font-family:Outfit,sans-serif;'
+        'text-transform:uppercase;letter-spacing:0.08em;font-weight:500">Score Range</div>'
         + score_range_legend()
-        + '<div style="font-size:10px;color:#3a4a5a;margin-bottom:10px">'
+        + '<div style="font-size:10px;color:#475569;margin-bottom:12px;font-family:Plus Jakarta Sans,sans-serif">'
           '分数越高 = 该行业被市场「挤」得越满，并非预测涨跌，而是反映赔率结构</div>',
         unsafe_allow_html=True
     )
@@ -588,20 +822,22 @@ def tab_ranking(scores: pd.DataFrame):
         text=z.round(0).astype(int).astype(str),
         texttemplate="%{text}",
         colorscale=[
-            [0.00, "#0a1810"], [0.35, "#152b15"],
-            [0.60, "#3d3208"], [0.80, "#5a1808"],
-            [1.00, "#8b1010"],
+            [0.00, "#061210"], [0.30, "#0c2618"],
+            [0.50, "#1a2a0c"], [0.65, "#3a2808"],
+            [0.80, "#4a1808"], [1.00, "#7a1010"],
         ],
         zmin=0, zmax=100,
         showscale=True,
-        colorbar=dict(title=dict(text="得分", font=dict(size=10, color="#6677aa")),
-                      thickness=10, tickfont=dict(size=9, color="#6677aa")),
+        colorbar=dict(title=dict(text="得分", font=dict(size=10, color="#536580")),
+                      thickness=10, tickfont=dict(size=9, color="#536580")),
         hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}<extra></extra>",
     ))
     fig.update_layout(
         height=chart_h, margin=dict(l=170, r=60, t=30, b=30),
-        xaxis=dict(side="top", tickfont=dict(size=11, color="#8899aa")),
-        yaxis=dict(tickfont=dict(size=10, color="#c8d8e8")),
+        xaxis=dict(side="top", tickfont=dict(size=11, color="#94a3b8",
+                   family="Plus Jakarta Sans, sans-serif")),
+        yaxis=dict(tickfont=dict(size=10, color="#e8ecf4",
+                   family="Plus Jakarta Sans, sans-serif")),
         **PT,
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -615,12 +851,13 @@ def tab_ranking(scores: pd.DataFrame):
         x=sd["总拥挤度"], y=bar_labels, orientation="h",
         marker_color=bar_colors,
         text=bar_text, textposition="outside",
-        textfont=dict(size=10, color="#6677aa"),
+        textfont=dict(size=10, color="#64748b", family="JetBrains Mono, monospace"),
         hovertemplate="<b>%{y}</b><br>总拥挤度: %{x:.1f}<extra></extra>",
     ))
     fig2.update_layout(
         xaxis=dict(title="总拥挤度", range=[0, 115],
-                   tickfont=dict(size=10, color="#6677aa")),
+                   tickfont=dict(size=10, color="#536580",
+                   family="JetBrains Mono, monospace")),
         height=chart_h, margin=dict(l=170, r=100, t=20, b=40), **PT,
     )
     st.plotly_chart(fig2, use_container_width=True)
@@ -670,14 +907,15 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
     level_desc = LEVEL_DESC.get(level_lbl, "")
 
     # ── 分数说明横幅
-    banner_bg = {"极度拥挤": "#200808", "高拥挤": "#1a0e06",
-                 "中等拥挤": "#141008", "低拥挤": "#081408"}.get(level_lbl, "#0d1220")
+    banner_bg = {"极度拥挤": "#180606", "高拥挤": "#160c04",
+                 "中等拥挤": "#100e04", "低拥挤": "#061008"}.get(level_lbl, "#0c1121")
     st.markdown(
         f'<div class="score-banner" style="background:{banner_bg};border-color:{color}">'
-        f'<b style="color:{color};font-size:16px">{total:.1f}</b>'
-        f'&nbsp; {badge(level_lbl)}&nbsp;&nbsp;'
-        f'<span style="color:#8a9aaa;font-size:12px">{level_desc}</span>'
-        f'</div>',
+        f'<span style="color:{color};font-size:26px;font-weight:800;'
+        f'font-family:JetBrains Mono,monospace;letter-spacing:-0.03em">{total:.1f}</span>'
+        f'&nbsp;&nbsp;{badge(level_lbl)}&nbsp;&nbsp;&nbsp;'
+        f'<span style="color:#64748b;font-size:12px;font-family:Plus Jakarta Sans,sans-serif">'
+        f'{level_desc}</span></div>',
         unsafe_allow_html=True
     )
 
@@ -695,13 +933,15 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
 
     with cb:
         st.markdown(
-            '<div style="color:#8899bb;font-size:11px;font-weight:600;margin-bottom:4px">'
-            '总分拆解 — 这个数字是怎么来的</div>',
+            '<div style="font-family:Outfit,sans-serif;color:#94a3b8;font-size:11px;'
+            'font-weight:600;margin-bottom:6px;letter-spacing:0.04em">'
+            'SCORE BREAKDOWN</div>',
             unsafe_allow_html=True
         )
         st.markdown(score_breakdown_html(row, weights), unsafe_allow_html=True)
         st.markdown(
-            '<div style="color:#3a4a6a;font-size:10px;margin-top:6px">'
+            '<div style="color:#475569;font-size:10px;margin-top:8px;'
+            'font-family:Plus Jakarta Sans,sans-serif">'
             '总分 = 各维度得分 × 对应权重之和。'
             '悬停维度名查看说明。</div>',
             unsafe_allow_html=True
@@ -717,8 +957,11 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
     # ── 五维可展开卡（按得分降序）
     st.markdown("---")
     st.markdown(
-        '<div style="color:#8899bb;font-size:12px;font-weight:600;margin-bottom:8px">'
-        '各维度详情 — 点击展开，查看子指标明细和解读</div>',
+        '<div style="font-family:Outfit,sans-serif;color:#94a3b8;font-size:12px;'
+        'font-weight:600;margin-bottom:10px;letter-spacing:0.03em">'
+        'DIMENSION DETAILS'
+        '<span style="color:#475569;font-weight:400;font-size:11px;margin-left:10px;'
+        'font-family:Plus Jakarta Sans,sans-serif">点击展开查看子指标明细</span></div>',
         unsafe_allow_html=True
     )
 
@@ -741,18 +984,19 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
     cl_score    = float(row.get("出清状态", 50))
     br_score    = float(row.get("广度与领导权", 50))
     st.markdown(
-        f'<div style="background:{state_bg};border:1px solid {state_color}40;'
-        f'border-left:3px solid {state_color};border-radius:5px;'
-        f'padding:10px 16px;margin-bottom:10px">'
+        f'<div style="background:{state_bg};border:1px solid {state_color}30;'
+        f'border-left:3px solid {state_color};border-radius:8px;'
+        f'padding:14px 18px;margin-bottom:12px">'
         f'<div style="display:flex;justify-content:space-between;align-items:center">'
-        f'<span style="color:{state_color};font-size:14px;font-weight:700">'
-        f'{state_icon} {state_name}</span>'
-        f'<span style="color:#6a7a8a;font-size:11px">{state_act}</span>'
+        f'<span style="color:{state_color};font-size:14px;font-weight:700;'
+        f'font-family:Outfit,sans-serif">{state_icon} {state_name}</span>'
+        f'<span style="color:#536580;font-size:11px;font-family:Outfit,sans-serif">{state_act}</span>'
         f'</div>'
-        f'<div style="color:#8a9aaa;font-size:11px;margin-top:5px;line-height:1.6">'
-        f'{state_expl}</div>'
-        f'<div style="color:#4a5a6a;font-size:10px;margin-top:4px">'
-        f'广度恶化 {br_score:.0f}分 · 出清信号 {cl_score:.0f}分</div>'
+        f'<div style="color:#94a3b8;font-size:11px;margin-top:6px;line-height:1.65;'
+        f'font-family:Plus Jakarta Sans,sans-serif">{state_expl}</div>'
+        f'<div style="color:#475569;font-size:10px;margin-top:6px;'
+        f'font-family:JetBrains Mono,monospace">'
+        f'BREADTH {br_score:.0f} · CLEARANCE {cl_score:.0f}</div>'
         f'</div>',
         unsafe_allow_html=True
     )
@@ -977,12 +1221,13 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
         if spy_p is not None:
             fig.add_trace(go.Scatter(
                 x=spy_p.index, y=(spy_p/spy_p.iloc[0]*100),
-                name="SPY", line=dict(color="#4466aa", width=1.5, dash="dot"),
+                name="SPY", line=dict(color="#6366f1", width=1.5, dash="dot"),
             ))
-        fig.add_hline(y=100, line_dash="dash", line_color="#2a3a4a", opacity=0.5)
+        fig.add_hline(y=100, line_dash="dash", line_color="#1e2d52", opacity=0.5)
         fig.update_layout(
             height=280, hovermode="x unified",
-            legend=dict(orientation="h", y=-0.2),
+            legend=dict(orientation="h", y=-0.2,
+                        font=dict(family="Outfit, sans-serif", size=11)),
             margin=dict(l=40, r=20, t=20, b=60),
             yaxis_title="相对表现", **PT,
         )
@@ -1127,9 +1372,11 @@ def tab_signals(scores: pd.DataFrame):
 # ─── Tab 5: 方法说明 ─────────────────────────────────────────────────────────
 def tab_method():
     st.markdown(
-        '<h3 style="color:#00d4aa;font-weight:400;margin-bottom:4px">方法说明</h3>'
-        '<div style="color:#4a5a7a;font-size:12px;margin-bottom:20px">'
-        'How This Tool Works — 打分框架、数据来源与局限性</div>',
+        '<h3 style="font-family:Outfit,sans-serif !important;color:#e8ecf4 !important;'
+        'font-weight:600 !important;margin-bottom:4px !important">方法说明</h3>'
+        '<div style="color:#536580;font-size:11px;margin-bottom:22px;'
+        'font-family:Outfit,sans-serif;letter-spacing:0.08em;text-transform:uppercase">'
+        'How This Tool Works — Scoring Framework, Data Sources & Limitations</div>',
         unsafe_allow_html=True
     )
 
@@ -1288,16 +1535,19 @@ def tab_method():
 def tab_state_machine(scores: pd.DataFrame):
     from config import STATE_CONFIG
     st.markdown(
-        '<h3 style="color:#00d4aa;font-weight:400;margin-bottom:4px">出清状态机</h3>'
-        '<div style="color:#4a5a7a;font-size:12px;margin-bottom:16px">'
-        '根据总拥挤度、广度恶化程度、出清信号强弱，自动归类7种市场状态</div>',
+        '<h3 style="font-family:Outfit,sans-serif !important;color:#e8ecf4 !important;'
+        'font-weight:600 !important;margin-bottom:4px !important">出清状态机</h3>'
+        '<div style="color:#536580;font-size:11px;margin-bottom:18px;'
+        'font-family:Outfit,sans-serif;letter-spacing:0.06em">'
+        'STATE MACHINE — 根据总拥挤度、广度恶化程度、出清信号强弱，自动归类7种市场状态</div>',
         unsafe_allow_html=True
     )
 
     # 状态分布（当前所有行业）
     st.markdown(
-        '<div style="color:#8899bb;font-size:12px;font-weight:600;margin-bottom:8px">'
-        '▶ 当前各行业状态分布</div>',
+        '<div style="font-family:Outfit,sans-serif;color:#94a3b8;font-size:12px;'
+        'font-weight:600;margin-bottom:10px;letter-spacing:0.04em">'
+        'CURRENT DISTRIBUTION</div>',
         unsafe_allow_html=True
     )
     state_groups: dict = {}
@@ -1338,8 +1588,10 @@ def tab_state_machine(scores: pd.DataFrame):
     # 状态机规则说明
     st.markdown("---")
     st.markdown(
-        '<div style="color:#8899bb;font-size:12px;font-weight:600;margin-bottom:8px">'
-        '▶ 状态机分类规则（优先级从高到低，首先匹配）</div>',
+        '<div style="font-family:Outfit,sans-serif;color:#94a3b8;font-size:12px;'
+        'font-weight:600;margin-bottom:10px;letter-spacing:0.04em">'
+        'CLASSIFICATION RULES <span style="color:#475569;font-weight:400;font-size:10px">'
+        '(priority descending, first match)</span></div>',
         unsafe_allow_html=True
     )
     rules = [
@@ -1406,10 +1658,14 @@ def main():
             st.stop()
 
     st.markdown(
-        '<h2 style="font-weight:300;letter-spacing:.04em">'
-        '美股行业拥挤度分析 '
-        '<span style="color:#00d4aa;font-size:13px;font-weight:400">'
-        '· 玻璃箱评分 · 六层框架 · 出清状态机 · 赔率视角</span></h2>',
+        '<div style="margin-bottom:8px">'
+        '<h2 style="font-family:Outfit,sans-serif !important;font-weight:700 !important;'
+        'letter-spacing:-0.02em;margin-bottom:2px !important">'
+        '美股行业拥挤度分析</h2>'
+        '<div style="font-family:Outfit,sans-serif;color:#00e5b8;font-size:11px;'
+        'font-weight:500;letter-spacing:0.12em;text-transform:uppercase">'
+        'Glass-Box Scoring &middot; Six-Layer Framework &middot; '
+        'State Machine &middot; Odds Perspective</div></div>',
         unsafe_allow_html=True
     )
 
