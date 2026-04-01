@@ -929,7 +929,7 @@ def tab_detail(scores: pd.DataFrame, detail: dict, weights: dict):
             except: return "color:#4a5a6a"
 
         st.dataframe(
-            sc_df.style.applymap(color_pct, subset=["历史分位", "子项贡献"]),
+            sc_df.style.map(color_pct, subset=["历史分位", "子项贡献"]),
             use_container_width=True, hide_index=True, height=500,
         )
 
